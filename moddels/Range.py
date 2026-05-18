@@ -8,3 +8,4 @@ class Range(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     range_name = Column(String(25), nullable=False)
     Number_of_days = Column(Integer, nullable=False)
+

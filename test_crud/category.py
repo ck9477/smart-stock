@@ -30,9 +30,7 @@ repo = CategoryRepository(session)
 # # READ - קבלת כל הקטגוריות
 # # -------------------------------
 all_categories = repo.get_all_categories()
-print("All Categories:", [(c.id, c.name, c.Range_id) for c in all_categories])
-
-# # -------------------------------
+print("All Categories:", [(c.id, c.name, c.Range_id) for c in all_categories])# # -------------------------------
 # # UPDATE - עדכון קטגוריה
 # # -------------------------------
 # category_to_update = all_categories[0] if all_categories else None
@@ -43,12 +41,12 @@ print("All Categories:", [(c.id, c.name, c.Range_id) for c in all_categories])
 # # -------------------------------
 # # DELETE - מחיקת קטגוריה
 # # -------------------------------
-category_to_delete = all_categories[1] if all_categories else None
-if category_to_delete:
-    deleted = repo.delete_category(category_to_delete.id)
-    print("Deleted Category:", deleted.id, deleted.name)
-else:
-    print("No categories to delete")
+# category_to_delete = all_categories[1] if all_categories else None
+# if category_to_delete:
+#     deleted = repo.delete_category(category_to_delete.id)
+#     print("Deleted Category:", deleted.id, deleted.name)
+# else:
+#     print("No categories to delete")
 
 # סגירת הסשן
 session.close()
