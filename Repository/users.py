@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from moddels.users import User  # הנח שהמודל שלך נקרא User
+from models.users import User  # הנח שהמודל שלך נקרא User
 
 class UserRepository:
     def __init__(self, session: Session):

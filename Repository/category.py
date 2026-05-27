@@ -1,5 +1,5 @@
 # Repository/category.py
-from moddels.category import Category
+from models.category import Category
 from sqlalchemy.orm import Session
 
 class CategoryRepository:

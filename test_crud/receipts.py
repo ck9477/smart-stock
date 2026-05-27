@@ -5,9 +5,9 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from db_connection import SessionLocal, engine  # החיבור למסד הנתונים
-from moddels.base import Base
-from moddels.users import User
-from moddels.receipts import Receipt
+from models.base import Base
+from models.users import User
+from models.receipts import Receipt
 from Repository.receipts import ReceiptRepository
 # יצירת סשן
 session = SessionLocal()
@@ -21,15 +21,15 @@ repo = ReceiptRepository(session)
 # -------------------------------
 # # CREATE - הוספת קבלה
 # # -------------------------------
-new_receipt = Receipt(user_id=4)
-repo.add_receipt(new_receipt)
-print("Created Receipt:", new_receipt.id, new_receipt.user_id, new_receipt.receipt_date)
+#new_receipt = Receipt(user_id=4)
+#repo.add_receipt(new_receipt)
+#print("Created Receipt:", new_receipt.id, new_receipt.user_id, new_receipt.receipt_date)
 
 # -------------------------------
 # READ - קבלת כל הקבלות
 # -------------------------------
-# all_receipts = repo.get_all_receipts()
-# print("All Receipts:", [(r.id, r.user_id, r.receipt_date) for r in all_receipts])
+all_receipts = repo.get_all_receipts()
+print("All Receipts:", [(r.id, r.user_id, r.receipt_date) for r in all_receipts])
 
 # -------------------------------
 # DELETE - מחיקת קבלה

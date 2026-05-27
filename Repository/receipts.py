@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from moddels.receipts import Receipt
+from models.receipts import Receipt
 
 class ReceiptRepository:
     def __init__(self, session: Session):

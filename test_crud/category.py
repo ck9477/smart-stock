@@ -3,7 +3,7 @@ import os
 import sys
 from sqlalchemy.orm import sessionmaker
 from db_connection import engine, SessionLocal  # ודא שיש לך את db_connection
-from moddels.category import Category, Base
+from models.category import Category, Base
 from Repository.category import CategoryRepository
 
 # יצירת הטבלאות אם הן לא קיימות
@@ -16,15 +16,15 @@ repo = CategoryRepository(session)
 # -------------------------------
 # CREATE - הוספת קטגוריות
 # -------------------------------
-# new_category1 = Category(name="Electronics", Range_id=2)
-# new_category2 = Category(name="Books", Range_id=3)
-#
-# repo.add_category(new_category1)
-# repo.add_category(new_category2)
-#
-# print("Created Categories:")
-# for c in [new_category1, new_category2]:
-#     print(f"{c.id}: {c.name}, Range_id={c.Range_id}")
+new_category1 = Category(name="Electronics", Range_id=6)
+new_category2 = Category(name="Books", Range_id=3)
+
+repo.add_category(new_category1)
+repo.add_category(new_category2)
+
+print("Created Categories:")
+for c in [new_category1, new_category2]:
+    print(f"{c.id}: {c.name}, Range_id={c.Range_id}")
 
 # # -------------------------------
 # # READ - קבלת כל הקטגוריות

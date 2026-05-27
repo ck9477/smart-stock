@@ -1,4 +1,4 @@
-from moddels.Range import Range
+from models.Range import Range
 
 class RangeRepository:
     def __init__(self, session):

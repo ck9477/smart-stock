@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from moddels.Products import Product  # או הייבוא המתאים לפי הפרויקט שלך
+from models.Products import Product  # או הייבוא המתאים לפי הפרויקט שלך
 
 class ProductRepository:
     def __init__(self, session: Session):

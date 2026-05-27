@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, func
-from .base import Base  # מניח שיש לך Base בקובץ base.py
+from models.base import Base  # מניח שיש לך Base בקובץ base.py
 
 class User(Base):
     __tablename__ = 'users'

@@ -6,8 +6,8 @@ from db_connection import SessionLocal,engine
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 # ייבוא המודל והריפוזיטורי
-from moddels.users import  User
-from moddels.base import Base
+from models.users import  User
+from models.base import Base
 from Repository.users import UserRepository
 session = SessionLocal()  # הסשן שאת מייבאת לכל מקום
 
@@ -21,7 +21,7 @@ repo = UserRepository(session)
 # CREATE - הוספת משתמש חדש
 # -------------------------------
 
-new_user = User(name="rtt", email="try45y@example.com", password_hash="434")
+new_user = User(name="עיעאיע", email="s45y@example.com", password_hash="556")
 repo.add_user(new_user)
 print("Created User:", new_user.id, new_user.name)
 

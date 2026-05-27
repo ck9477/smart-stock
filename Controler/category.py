@@ -1,0 +1,95 @@
+from flask import Blueprint, request, jsonify
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
+from models.category import Category
+
+engine = create_engine('mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server')
+Session = sessionmaker(bind=engine)
+
+category_bp = Blueprint('category', __name__, url_prefix='/category')
+
+
+# CREATE
+@category_bp.route('', methods=['POST'])
+def create_category():
+    session = Session()
+    data = request.json
+
+    obj = Category(
+        name=data["name"],
+        Range_id=data["range_id"]
+    )
+
+    session.add(obj)
+    session.commit()
+    session.refresh(obj)
+
+    session.close()
+    return jsonify({"id": obj.id})
+
+
+# GET ALL
+@category_bp.route('', methods=['GET'])
+def get_categories():
+    session = Session()
+    items = session.query(Category).all()
+    session.close()
+
+    return jsonify([
+        {"id": c.id, "name": c.name, "range_id": c.Range_id}
+        for c in items
+    ])
+
+
+# GET BY ID
+@category_bp.route('/<int:id>', methods=['GET'])
+def get_category(id):
+    session = Session()
+    obj = session.query(Category).filter(Category.id == id).first()
+    session.close()
+
+    if not obj:
+        return jsonify({"error": "not found"}), 404
+
+    return jsonify({
+        "id": obj.id,
+        "name": obj.name,
+        "range_id": obj.Range_id
+    })
+
+
+# UPDATE
+@category_bp.route('/<int:id>', methods=['PUT'])
+def update_category(id):
+    session = Session()
+    data = request.json
+
+    obj = session.query(Category).filter(Category.id == id).first()
+    if not obj:
+        session.close()
+        return jsonify({"error": "not found"}), 404
+
+    obj.name = data.get("name", obj.name)
+    obj.Range_id = data.get("range_id", obj.Range_id)
+
+    session.commit()
+    session.close()
+
+    return jsonify({"message": "updated"})
+
+
+# DELETE
+@category_bp.route('/<int:id>', methods=['DELETE'])
+def delete_category(id):
+    session = Session()
+
+    obj = session.query(Category).filter(Category.id == id).first()
+    if not obj:
+        session.close()
+        return jsonify({"error": "not found"}), 404
+
+    session.delete(obj)
+    session.commit()
+    session.close()
+
+    return jsonify({"message": "deleted"})

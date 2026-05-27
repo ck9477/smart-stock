@@ -3,7 +3,7 @@ import os
 import sys
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
-from moddels.Products import Product, Base
+from models.Products import Product, Base
 from Repository.Products import ProductRepository
 from db_connection import engine, SessionLocal  # ודא שיש לך את הקובץ שמגדיר את החיבור למסד האמיתי
 
@@ -21,7 +21,7 @@ repo = ProductRepository(session)  # שים לב: פה משתמשים רק בס�
 # -------------------------------
 # CREATE - הוספת מוצר
 # -------------------------------
-new_product = Product(name="Test Product", category_id=16)
+new_product = Product(name="Test p", category_id=23)
 added_product = repo.add(new_product)
 print(f"Created Product: {added_product.id}, {added_product.name}, category_id={added_product.category_id}")
 

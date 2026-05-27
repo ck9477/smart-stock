@@ -4,8 +4,8 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from db_connection import SessionLocal, engine
-from moddels.base import Base
-from moddels.Range import Range
+from models.base import Base
+from models.Range import Range
 from Repository.Range import RangeRepository
 
 # יצירת סשן

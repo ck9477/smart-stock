@@ -1,6 +1,6 @@
 # models/range.py
 from sqlalchemy import Column, Integer, String
-from .base import Base
+from models.base import Base
 
 class Range(Base):
     __tablename__ = 'Range'  # שם הטבלה כפי במסד
