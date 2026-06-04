@@ -71,30 +71,6 @@ def get_by_id(id):
     })
 
 
-# UPDATE
-@reception_bp.route('/<int:id>', methods=['PUT'])
-def update(id):
-    session = Session()
-    data = request.json
-
-    item = session.query(ReceptionProducts)\
-        .filter(ReceptionProducts.id == id)\
-        .first()
-
-    if not item:
-        session.close()
-        return jsonify({"error": "not found"}), 404
-
-    item.receipts_id = data.get("receipts_id", item.receipts_id)
-    item.products_id = data.get("products_id", item.products_id)
-    item.amount = data.get("amount", item.amount)
-
-    session.commit()
-    session.close()
-
-    return jsonify({"message": "updated"})
-
-
 # DELETE
 @reception_bp.route('/<int:id>', methods=['DELETE'])
 def delete(id):

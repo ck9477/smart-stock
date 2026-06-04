@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from models.Products import Product  # או הייבוא המתאים לפי הפרויקט שלך
+from models.Products import Product
 
 class ProductRepository:
     def __init__(self, session: Session):
@@ -8,7 +8,7 @@ class ProductRepository:
     def add(self, product: Product):
         self.session.add(product)
         self.session.commit()
-        self.session.refresh(product)  # מחזיר את האובייקט עם ה-ID שנוצר
+        self.session.refresh(product)
         return product
 
     def get_by_id(self, product_id: int):

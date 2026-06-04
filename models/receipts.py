@@ -3,7 +3,6 @@ from models.base import Base
 
 class Receipt(Base):
     __tablename__ = 'receipts'
-    # __table_args__ = {'schema': 'dbo'}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(

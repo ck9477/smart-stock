@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from models.Products import Product, Base
 from Repository.Products import ProductRepository
-from db_connection import engine, SessionLocal  # ודא שיש לך את הקובץ שמגדיר את החיבור למסד האמיתי
+from db_connection import engine, SessionLocal
 
 # -------------------------------
 # יצירת טבלאות אם הן לא קיימות
@@ -21,7 +21,11 @@ repo = ProductRepository(session)  # שים לב: פה משתמשים רק בס�
 # -------------------------------
 # CREATE - הוספת מוצר
 # -------------------------------
-new_product = Product(name="Test p", category_id=23)
+new_product = Product(
+    name="Test p",
+    category_id=23,
+    volume_ml=500
+)
 added_product = repo.add(new_product)
 print(f"Created Product: {added_product.id}, {added_product.name}, category_id={added_product.category_id}")
 

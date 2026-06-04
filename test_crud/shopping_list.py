@@ -32,7 +32,7 @@ try:
 
     new_item = ShoppingList(
         product_id=product.id,
-        amount=2,
+        amount=4,
         range_enum=range_item.id
     )
 

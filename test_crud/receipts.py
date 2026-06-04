@@ -1,10 +1,9 @@
 import sys
 import os
 
-# הוספת תיקיית הפרויקט ל-Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from db_connection import SessionLocal, engine  # החיבור למסד הנתונים
+from db_connection import SessionLocal, engine
 from models.base import Base
 from models.users import User
 from models.receipts import Receipt

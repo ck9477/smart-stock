@@ -1,95 +1,133 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
+from Service.receipt import ReceiptService
 from models.receipts import Receipt
 
 engine = create_engine(
     'mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server'
 )
-
 Session = sessionmaker(bind=engine)
 
 receipt_bp = Blueprint('receipts', __name__, url_prefix='/receipts')
 
-
-# CREATE
+# -----------------------------
+# CREATE RECEIPT
+# -----------------------------
 @receipt_bp.route('', methods=['POST'])
 def create():
     session = Session()
-    data = request.json
+    try:
+        data = request.get_json()  # מבטיח שמקבלים JSON
 
-    obj = Receipt(user_id=data["user_id"])
-    session.add(obj)
-    session.commit()
-    session.refresh(obj)
-    session.close()
+        # בדיקה אם user_id קיים
+        if not data or "user_id" not in data:
+            return jsonify({"error": "user_id is required"}), 400
 
-    return jsonify({"id": obj.id})
+        user_id = data["user_id"]
+        service = ReceiptService(session)
+        receipt_id = service.create_receipt(user_id=user_id)
 
+        return jsonify({"id": receipt_id})
 
-# GET ALL
-@receipt_bp.route('', methods=['GET'])
-def get_all():
-    session = Session()
-    items = session.query(Receipt).all()
-    session.close()
-
-    return jsonify([
-        {"id": i.id, "user_id": i.user_id}
-        for i in items
-    ])
-
-
-# GET BY ID
-@receipt_bp.route('/<int:id>', methods=['GET'])
-def get_by_id(id):
-    session = Session()
-
-    item = session.query(Receipt).filter(Receipt.id == id).first()
-    session.close()
-
-    if not item:
-        return jsonify({"error": "not found"}), 404
-
-    return jsonify({
-        "id": item.id,
-        "user_id": item.user_id
-    })
-
-
-# UPDATE
-@receipt_bp.route('/<int:id>', methods=['PUT'])
-def update(id):
-    session = Session()
-    data = request.json
-
-    item = session.query(Receipt).filter(Receipt.id == id).first()
-
-    if not item:
+    finally:
         session.close()
-        return jsonify({"error": "not found"}), 404
+# -----------------------------
+# PROCESS RECEIPT + PRODUCTS
+# -----------------------------
+@receipt_bp.route('/process/<int:receipt_id>', methods=['POST'])
+def process_receipt(receipt_id):
+    session = Session()
+    try:
+        data = request.json
+        products = data.get("products", [])
 
-    item.user_id = data.get("user_id", item.user_id)
+        service = ReceiptService(session)
+        result = service.process_receipt(receipt_id, products)
 
-    session.commit()
-    session.close()
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        session.rollback()
+        return jsonify({"error": str(e)}), 400
+    finally:
+        session.close()
 
-    return jsonify({"message": "updated"})
+
+# -----------------------------
+# GET BY USER ID
+# -----------------------------
+@receipt_bp.route('/user/<int:user_id>', methods=['GET'])
+def get_by_user_id(user_id):
+    session = Session()
+    try:
+        items = session.query(Receipt).filter(Receipt.user_id == user_id).all()
+        if not items:
+            return jsonify({"error": "not found"}), 404
+
+        return jsonify([
+            {
+                "id": item.id,
+                "user_id": item.user_id
+            } for item in items
+        ])
+    finally:
+        session.close()
 
 
-# DELETE
+# -----------------------------
+# DELETE RECEIPT
+# -----------------------------
 @receipt_bp.route('/<int:id>', methods=['DELETE'])
 def delete(id):
     session = Session()
+    try:
+        item = session.query(Receipt).filter(Receipt.id == id).first()
+        if not item:
+            return jsonify({"error": "not found"}), 404
 
-    item = session.query(Receipt).filter(Receipt.id == id).first()
-
-    if not item:
+        session.delete(item)
+        session.commit()
+        return jsonify({"message": "deleted"})
+    finally:
         session.close()
-        return jsonify({"error": "not found"}), 404
+from models.Reception_products import ReceptionProducts
 
-    session.delete(item)
-    session.commit()
-    session.close()
 
-    return jsonify({"message": "deleted"})
+from models.Products import Product
+from models.Reception_products import ReceptionProducts
+
+
+# -----------------------------
+# GET PRODUCTS BY RECEIPT ID
+# -----------------------------
+@receipt_bp.route('/<int:receipt_id>/products', methods=['GET'])
+def get_products_by_receipt(receipt_id):
+    session = Session()
+
+    try:
+        items = session.query(
+            ReceptionProducts,
+            Product
+        ).join(
+            Product,
+            ReceptionProducts.products_id == Product.id
+        ).filter(
+            ReceptionProducts.receipts_id == receipt_id
+        ).all()
+
+        return jsonify([
+            {
+                "id": reception.id,
+                "receipt_id": reception.receipts_id,
+                "product_id": product.id,
+                "product_name": product.name,
+                "volume_ml": product.volume_ml,
+                "amount": reception.amount
+            }
+            for reception, product in items
+        ])
+
+    finally:
+        session.close()

@@ -11,7 +11,6 @@ from models.Products import Product
 from models.Product_range_for_the_user import ProductRangeForTheUser
 from Repository.Product_range_for_the_user import ProductRangeForTheUserRepository
 
-# וודא שכל המודלים נטענו לפני create_all
 Base.metadata.create_all(engine)
 
 # יצירת סשן
@@ -23,6 +22,6 @@ repo = ProductRangeForTheUserRepository(session)
 # -------------------------------
 # CREATE - הוספת פריט חדש
 # -------------------------------
-new_item = ProductRangeForTheUser(user_id=4, Products_id=3, Range_id=4)
+new_item = ProductRangeForTheUser(user_id=4, Products_id=5, Range_id=4)
 added_item = repo.add_item(new_item)
 print("Created Item:", added_item.id, added_item.user_id, added_item.Products_id, added_item.Range_id)

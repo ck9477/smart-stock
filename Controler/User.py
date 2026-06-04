@@ -150,13 +150,3 @@ def login():
         "user_id": user.id
     })
 
-
-# DELETE ALL USERS (לבדיקות בלבד)
-@user_bp.route('/clear', methods=['DELETE'])
-def clear_users():
-    session = Session()
-    session.query(User).delete()
-    session.commit()
-    session.close()
-
-    return jsonify({"message": "all users deleted"})

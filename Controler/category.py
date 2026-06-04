@@ -57,39 +57,3 @@ def get_category(id):
         "range_id": obj.Range_id
     })
 
-
-# UPDATE
-@category_bp.route('/<int:id>', methods=['PUT'])
-def update_category(id):
-    session = Session()
-    data = request.json
-
-    obj = session.query(Category).filter(Category.id == id).first()
-    if not obj:
-        session.close()
-        return jsonify({"error": "not found"}), 404
-
-    obj.name = data.get("name", obj.name)
-    obj.Range_id = data.get("range_id", obj.Range_id)
-
-    session.commit()
-    session.close()
-
-    return jsonify({"message": "updated"})
-
-
-# DELETE
-@category_bp.route('/<int:id>', methods=['DELETE'])
-def delete_category(id):
-    session = Session()
-
-    obj = session.query(Category).filter(Category.id == id).first()
-    if not obj:
-        session.close()
-        return jsonify({"error": "not found"}), 404
-
-    session.delete(obj)
-    session.commit()
-    session.close()
-
-    return jsonify({"message": "deleted"})
