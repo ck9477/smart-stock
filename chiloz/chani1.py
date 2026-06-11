@@ -3,9 +3,8 @@ import re
 from pathlib import Path
 from bidi.algorithm import get_display
 
-
 # -----------------------------
-# LOAD
+# LOAD INVOICE
 # -----------------------------
 def extract_single_invoice(file_path):
     file_path = Path(file_path)
@@ -23,13 +22,11 @@ def extract_single_invoice(file_path):
     data["file_name"] = file_path.name
     return data
 
-
 # -----------------------------
-# NAME (רק תיקון עברית בלי לשבור לוגיקה)
+# EXTRACT PRODUCT NAME
 # -----------------------------
 def extract_product_name(text, code):
     text = text.replace(code, "")
-
     text = re.sub(r'\d+\.\d+', '', text)
     text = re.sub(r'\d+%', '', text)
 
@@ -41,14 +38,12 @@ def extract_product_name(text, code):
     text = re.sub(r'[-*/"(),.:]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
 
-    # 🔥 תיקון עברית רק כאן
     text = get_display(text)
 
     return text if len(text) > 2 else ""
 
-
 # -----------------------------
-# QUANTITY (לא נגענו - כמו שלך)
+# EXTRACT QUANTITY
 # -----------------------------
 def extract_quantity(text):
     match = re.search(r'\b(\d{1,2})\s+\1\b', text)
@@ -67,26 +62,49 @@ def extract_quantity(text):
 
     return 1, "units"
 
-
 # -----------------------------
-# WEIGHT EXTRACTION
+# EXTRACT WEIGHT
 # -----------------------------
 def extract_weight_grams(name):
-    match = re.search(r'(\d+)\s*(גרם|g)', name)
-    if match:
-        return int(match.group(1))
+    patterns = [
+        r'(\d{2,5})\s*גרם',
+        r'(\d{2,5})\s*ג\b',
+        r'(\d+(?:\.\d+)?)\s*קג',
+        r'(\d+(?:\.\d+)?)\s*ק"ג',
+        r'(\d+(?:\.\d+)?)\s*ליטר',
+        r'(\d+(?:\.\d+)?)\s*ל\b',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, name, re.IGNORECASE)
+
+        if match:
+            value = float(match.group(1))
+
+            if "קג" in pattern or 'ק"ג' in pattern or "ליטר" in pattern:
+                return int(value * 1000)
+
+            return int(value)
+
+    numbers = re.findall(r'\b(\d{2,5})\b', name)
+
+    for n in numbers:
+        n = int(n)
+
+        if 50 <= n <= 2000:
+            return n
+
     return None
 
-
 # -----------------------------
-# REAL PRODUCT FILTER
+# FILTER REAL PRODUCTS
 # -----------------------------
 def is_real_product(name):
     blacklist = [
         "טלפון", "פקס", "כתובת", "עוסק", "מורשה",
         "משלוח", "תעודת", "הזמנה", "חשבונית", "מסמך",
-        "קבלה", "סהכ", 'סה"כ', "מעמ", 'מע"מ', "tax",
-        "total", "invoice", "receipt"
+        "קבלה", "סהכ", 'סה"כ', "מעמ", 'מע"מ',
+        "tax", "total", "invoice", "receipt"
     ]
 
     name_lower = name.lower()
@@ -103,9 +121,8 @@ def is_real_product(name):
 
     return True
 
-
 # -----------------------------
-# PARSER
+# PARSE INVOICE
 # -----------------------------
 def parse_invoice_text(text):
     lines = text.splitlines()
@@ -116,9 +133,15 @@ def parse_invoice_text(text):
     code_pattern = re.compile(r'\b(\d{6,14})\b')
 
     skip_words = [
-        "חשבונית", "invoice", "receipt",
-        "טלפון", "פקס", "כתובת",
-        "סהכ", "total", "tax"
+        "חשבונית",
+        "invoice",
+        "receipt",
+        "טלפון",
+        "פקס",
+        "כתובת",
+        "סהכ",
+        "total",
+        "tax"
     ]
 
     for line in lines:
@@ -131,15 +154,19 @@ def parse_invoice_text(text):
             continue
 
         codes = code_pattern.findall(line)
+
         if not codes:
             continue
 
         code = codes[0]
+
         if code in seen:
             continue
+
         seen.add(code)
 
         name = extract_product_name(line, code)
+
         if not name or not is_real_product(name):
             continue
 
@@ -148,7 +175,7 @@ def parse_invoice_text(text):
 
         items.append({
             "code": code,
-            "name": name,
+            "name": name,  # נשאר בדיוק כפי שחולץ
             "quantity": qty,
             "unit_type": unit,
             "weight_grams": weight
@@ -156,9 +183,8 @@ def parse_invoice_text(text):
 
     return {"items": items}
 
-
 # -----------------------------
-# RUN
+# MAIN
 # -----------------------------
 if __name__ == "__main__":
     file_path = r"H:\smart-stock-project\attachments (13)\30000219419.pdf"

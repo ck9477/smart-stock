@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 from models.receipts import Receipt
+
 
 class ReceiptRepository:
     def __init__(self, session: Session):
@@ -8,27 +8,30 @@ class ReceiptRepository:
 
     # CREATE
     def add_receipt(self, receipt: Receipt):
-        try:
-            with self.session.begin():  # התחלת טרנזקציה
-                self.session.add(receipt)
-            return receipt
-        except SQLAlchemyError as e:
-            self.session.rollback()
-            raise e
+        self.session.add(receipt)
+        return receipt
 
     # READ
     def get_receipt_by_id(self, receipt_id: int):
-        return self.session.query(Receipt).filter(Receipt.id == receipt_id).first()
+        return self.session.get(Receipt, receipt_id)
 
     def get_all_receipts(self):
         return self.session.query(Receipt).all()
 
+    # UPDATE
+    def update_receipt(self, receipt_id: int, **kwargs):
+        receipt = self.get_receipt_by_id(receipt_id)
+        if receipt is None:
+            return None
+        for key, value in kwargs.items():
+            if hasattr(receipt, key):
+                setattr(receipt, key, value)
+        self.session.commit()
+        return receipt
+
     # DELETE
-
-
     def delete_receipt(self, receipt_id: int):
-        receipt = self.session.query(Receipt).get(receipt_id)
+        receipt = self.get_receipt_by_id(receipt_id)
         if receipt:
             self.session.delete(receipt)
-            self.session.commit()
         return receipt

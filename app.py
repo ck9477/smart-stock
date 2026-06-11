@@ -5,7 +5,7 @@ from Controler.receipts import receipt_bp
 from Controler.receiption_products import reception_bp
 from Controler.shopping_list import shopping_bp
 from Controler.product_renge_for_user import product_range_bp
-
+from Controler.receipts import receipt_bp
 app = Flask(__name__)
 from Controler.User import user_bp
 
@@ -14,7 +14,8 @@ from Controler.category import category_bp
 
 app.register_blueprint(category_bp)
 app.register_blueprint(product_bp)
-
+import sys
+print("Python executable:", sys.executable)
 # RANGE
 app.register_blueprint(range_bp)
 
@@ -28,17 +29,13 @@ app.register_blueprint(reception_bp)
 app.register_blueprint(shopping_bp)
 
 app.register_blueprint(product_range_bp)
-
-if __name__ == "__main__":
-    app.run(debug=True)
 @app.route("/test")
 def test():
     return {
         "message": "working"
     }
-
 if __name__ == "__main__":
-
+    print(app.url_map)
     app.run(debug=True)
 
-print(app.url_map)
+

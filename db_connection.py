@@ -27,3 +27,14 @@ engine = create_engine(
 
 # יצירת סשן
 SessionLocal = sessionmaker(bind=engine)
+
+from flask import Flask
+from Controler.receipt_processing import ReceiptController
+
+app = Flask(__name__)
+
+receipt_controller = ReceiptController()
+
+@app.route("/receipt/upload", methods=["POST"])
+def upload_receipt():
+    return receipt_controller.upload_receipt()
