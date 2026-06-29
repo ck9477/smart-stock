@@ -20,15 +20,15 @@ repo = ReceiptRepository(session)
 # -------------------------------
 # # CREATE - הוספת קבלה
 # # -------------------------------
-#new_receipt = Receipt(user_id=4)
-#repo.add_receipt(new_receipt)
-#print("Created Receipt:", new_receipt.id, new_receipt.user_id, new_receipt.receipt_date)
+# new_receipt = Receipt(user_id=36)
+# repo.add_receipt(new_receipt)
+# print("Created Receipt:", new_receipt.id, new_receipt.user_id, new_receipt.receipt_date)
 
 # -------------------------------
 # READ - קבלת כל הקבלות
 # -------------------------------
-all_receipts = repo.get_all_receipts()
-print("All Receipts:", [(r.id, r.user_id, r.receipt_date) for r in all_receipts])
+# all_receipts = repo.get_all_receipts()
+# print("All Receipts:", [(r.id, r.user_id, r.receipt_date) for r in all_receipts])
 
 # -------------------------------
 # DELETE - מחיקת קבלה
