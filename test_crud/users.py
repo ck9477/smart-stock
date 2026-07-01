@@ -21,7 +21,7 @@ repo = UserRepository(session)
 # CREATE - הוספת משתמש חדש
 # -------------------------------
 
-new_user = User(name="עיעאיע", email="s45y@example.com", password_hash="556")
+new_user = User(name="נעמי", email="N@gmail.com", password_hash="325655899")
 repo.add_user(new_user)
 print("Created User:", new_user.id, new_user.name)
 

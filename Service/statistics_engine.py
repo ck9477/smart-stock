@@ -1,165 +1,99 @@
 import pyodbc
 from datetime import datetime
-import statistics
-
-
-SERVER = 'D403-005'
-DATABASE = 'SmartStock'
-DRIVER = 'ODBC Driver 17 for SQL Server'
-
-
-def get_connection():
-    conn_str = (
-        f'DRIVER={{{DRIVER}}};'
-        f'SERVER={SERVER};'
-        f'DATABASE={DATABASE};'
-        f'Trusted_Connection=yes;'
-    )
-    return pyodbc.connect(conn_str)
+from collections import defaultdict
 
 
 class StatisticsEngine:
-
     def __init__(self):
-        self.conn = get_connection()
-        self.cursor = self.conn.cursor()
+        self.conn = pyodbc.connect(
+            "DRIVER={SQL Server};"
+            "SERVER=localhost;"
+            "DATABASE=SmartStock;"
+            "Trusted_Connection=yes;"
+        )
 
-    def fetch_user_data(self, user_id):
-
+    def fetch_data(self, user_id):
         query = """
-        SELECT 
-            p.name,
-            p.code,
-            rp.amount,
-            r.receipt_date
-        FROM receipts r
-        JOIN Reception_products rp ON r.id = rp.receipts_id
-        JOIN Products p ON p.id = rp.Products_id
+        SELECT rp.Products_id, r.receipt_date
+        FROM Reception_products rp
+        JOIN receipts r ON rp.receipts_id = r.id
         WHERE r.user_id = ?
-        ORDER BY p.code, r.receipt_date
+        ORDER BY rp.Products_id, r.receipt_date
         """
+        return self.conn.cursor().execute(query, user_id).fetchall()
 
-        self.cursor.execute(query, (user_id,))
-        return self.cursor.fetchall()
+    def analyze(self, rows):
+        data = defaultdict(list)
 
-    def filter_outliers(self, history):
+        # המרה בטוחה לתאריכים
+        for product_id, date in rows:
+            d = datetime.strptime(str(date)[:10], "%Y-%m-%d")
+            data[product_id].append(d)
 
-        if len(history) < 4:
-            return history
+        results = []
 
-        amounts = [h[1] for h in history]
-        median_amount = statistics.median(amounts)
+        for product_id, dates in data.items():
 
-        filtered = []
-        for date, amount in history:
-            if amount > median_amount * 2.5:
-                continue
-            filtered.append((date, amount))
-
-        return filtered if len(filtered) >= 2 else history
-
-    def build_statistics(self, rows):
-
-        if not rows:
-            return []
-
-        data = {}
-
-        for name, barcode, amount, date in rows:
-            data.setdefault(barcode, {
-                "name": name,
-                "history": []
-            })
-            data[barcode]["history"].append((date, int(amount or 0)))
-
-        result = []
-        now = datetime.now()
-
-        for barcode, item in data.items():
-
-            history = sorted(item["history"], key=lambda x: x[0])
-            history = self.filter_outliers(history)
-
-            dates = [h[0] for h in history]
-            amounts = [h[1] for h in history]
-
-            if not history:
-                continue
-
-            days_since = (now - dates[-1]).total_seconds() / 86400
-
-            if len(history) == 1:
-                result.append({
-                    "product_name": item["name"],
-                    "barcode": barcode,
-                    "quantity": max(1, amounts[0]),
-                    "avg_gap_days": None,
-                    "days_since": round(days_since, 2),
-                    "lateness_days": round(days_since, 2),
-                    "stability": 0.0,
-                    "confidence": 0.1,
-                    "pattern": "single_point",
-                    "score": 0.2,
-                    "level": "low",
-                    "next_expected_date": None
-                })
+            # 🔴 סינון רעש: לפחות 3 קניות
+            if len(dates) < 3:
                 continue
 
             gaps = [
-                (dates[i] - dates[i - 1]).total_seconds() / 86400
+                (dates[i] - dates[i - 1]).days
                 for i in range(1, len(dates))
             ]
 
-            avg_gap = statistics.median(gaps)
+            if not gaps:
+                continue
 
-            if len(gaps) == 1:
-                stability = 0.4
-                confidence = 0.3
-                pattern = "weak_signal"
-            else:
-                mad = statistics.mean([abs(g - avg_gap) for g in gaps])
-                stability = max(0, 1 - (mad / avg_gap if avg_gap else 1))
-                confidence = min(1.0, len(gaps) / 6) * stability
+            avg_gap = sum(gaps) / len(gaps)
 
-                if stability < 0.4:
-                    pattern = "irregular"
-                elif avg_gap <= 5:
-                    pattern = "fast_cycle"
-                elif avg_gap <= 15:
-                    pattern = "weekly_cycle"
-                else:
-                    pattern = "long_cycle"
+            # מניעת cycle 0 או לא הגיוני
+            if avg_gap <= 0:
+                continue
 
-            expected_date = dates[-1] + statistics.timedelta(days=int(avg_gap)) if hasattr(statistics, "timedelta") else None
+            variance = sum((g - avg_gap) ** 2 for g in gaps) / len(gaps)
+            stability = max(0, 1 - (variance / (avg_gap ** 2 + 1)))
 
-            lateness_days = 0
-            score = 0.2
-            level = "low"
+            days_since = (datetime.now().date() - dates[-1].date()).days
 
-            result.append({
-                "product_name": item["name"],
-                "barcode": barcode,
-                "quantity": max(1, int(statistics.mean(amounts) * (1 + confidence))),
-                "avg_gap_days": round(avg_gap, 2),
-                "days_since": round(days_since, 2),
-                "lateness_days": round(lateness_days, 2),
+            trend = (gaps[-1] - avg_gap) / (avg_gap + 1)
+
+            n = len(dates)
+            confidence = min(1.0, n / 8)
+
+            score = (days_since / avg_gap) * stability * confidence
+
+            results.append({
+                "product_id": product_id,
+                "cycle": round(avg_gap, 2),
                 "stability": round(stability, 2),
-                "confidence": round(confidence, 2),
-                "pattern": pattern,
+                "trend": round(trend, 2),
+                "days_since": days_since,
                 "score": round(score, 2),
-                "level": level,
-                "next_expected_date": None
+                "n": n
             })
 
-        return result
+        return sorted(results, key=lambda x: x["score"], reverse=True)
 
-    def get_statistics(self, user_id):
-        rows = self.fetch_user_data(user_id)
-        return self.build_statistics(rows)
+    def get_recommendations(self, user_id):
+        rows = self.fetch_data(user_id)
+        results = self.analyze(rows)
+
+        print("ENGINE RUNNING\n")
+
+        for r in results:
+            print(
+                r["product_id"],
+                r["score"],
+                f"cycle:{r['cycle']}",
+                f"since:{r['days_since']}",
+                f"n:{r['n']}"
+            )
+
+        return results
 
 
 if __name__ == "__main__":
     engine = StatisticsEngine()
-
-    for item in engine.get_statistics(29):
-        print(f"{item['product_name']} -> {item['quantity']}")
+    engine.get_recommendations(50)

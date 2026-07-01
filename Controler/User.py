@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from werkzeug.security import generate_password_hash, check_password_hash
 from models.users import User
 
 engine = create_engine(
@@ -12,96 +13,146 @@ Session = sessionmaker(bind=engine)
 user_bp = Blueprint('users', __name__, url_prefix='/users')
 
 
-# CREATE
+# CREATE USER
 @user_bp.route('', methods=['POST'])
 def create_user():
     session = Session()
-    data = request.json
+    try:
+        data = request.json
 
-    user = User(
-        name=data["name"],
-        email=data["email"],
-        password_hash=data["password"]
-    )
+        user = User(
+            name=data["name"],
+            email=data["email"],
+            password_hash=generate_password_hash(data["password"])
+        )
 
-    session.add(user)
-    session.commit()
-    session.refresh(user)  # מבטיח שה-ID נטען מהDB
+        session.add(user)
+        session.commit()
+        session.refresh(user)
 
-    user_id = user.id
+        return jsonify({"id": user.id})
 
-    session.close()
+    finally:
+        session.close()
 
-    return jsonify({"id": user_id})
 
-# GET ALL
+# GET ALL USERS
 @user_bp.route('', methods=['GET'])
 def get_users():
     session = Session()
-    users = session.query(User).all()
+    try:
+        users = session.query(User).all()
 
-    session.close()
+        return jsonify([
+            {"id": u.id, "name": u.name, "email": u.email}
+            for u in users
+        ])
 
-    return jsonify([
-        {"id": u.id, "name": u.name, "email": u.email}
-        for u in users
-    ])
+    finally:
+        session.close()
 
 
-# GET BY ID
+# GET USER BY ID
 @user_bp.route('/<int:id>', methods=['GET'])
 def get_user(id):
     session = Session()
-    user = session.query(User).filter(User.id == id).first()
-    session.close()
+    try:
+        user = session.query(User).filter(User.id == id).first()
 
-    return jsonify({"id": user.id, "name": user.name, "email": user.email})
+        if not user:
+            return jsonify({"error": "user not found"}), 404
+
+        return jsonify({
+            "id": user.id,
+            "name": user.name,
+            "email": user.email
+        })
+
+    finally:
+        session.close()
 
 
-# UPDATE
+# UPDATE USER
 @user_bp.route('/<int:id>', methods=['PUT'])
 def update_user(id):
     session = Session()
-    data = request.json
+    try:
+        data = request.json
 
-    user = session.query(User).filter(User.id == id).first()
+        user = session.query(User).filter(User.id == id).first()
 
-    user.name = data.get("name", user.name)
-    user.email = data.get("email", user.email)
+        if not user:
+            return jsonify({"error": "user not found"}), 404
 
-    session.commit()
-    session.close()
+        user.name = data.get("name", user.name)
+        user.email = data.get("email", user.email)
 
-    return jsonify({"message": "updated"})
+        session.commit()
+
+        return jsonify({"message": "updated"})
+
+    finally:
+        session.close()
 
 
-# DELETE
+# DELETE USER
 @user_bp.route('/<int:id>', methods=['DELETE'])
 def delete_user(id):
     session = Session()
+    try:
+        user = session.query(User).filter(User.id == id).first()
 
-    user = session.query(User).filter(User.id == id).first()
+        if not user:
+            return jsonify({"error": "user not found"}), 404
 
-    session.delete(user)
-    session.commit()
-    session.close()
+        session.delete(user)
+        session.commit()
 
-    return jsonify({"message": "deleted"})
+        return jsonify({"message": "deleted"})
+
+    finally:
+        session.close()
+
+
+# LOGIN
+@user_bp.route('/login', methods=['POST'])
+def login():
+    session = Session()
+    try:
+        data = request.json
+
+        user = session.query(User).filter(User.email == data["email"]).first()
+
+        if not user or not check_password_hash(user.password_hash, data["password"]):
+            return jsonify({"error": "invalid credentials"}), 401
+
+        return jsonify({
+            "message": "login success",
+            "user_id": user.id
+        })
+
+    finally:
+        session.close()
+
+
 # GET BY EMAIL
 @user_bp.route('/by-email/<email>', methods=['GET'])
 def get_user_by_email(email):
     session = Session()
-    user = session.query(User).filter(User.email == email).first()
-    session.close()
+    try:
+        user = session.query(User).filter(User.email == email).first()
 
-    if not user:
-        return jsonify({"error": "user not found"}), 404
+        if not user:
+            return jsonify({"error": "user not found"}), 404
 
-    return jsonify({
-        "id": user.id,
-        "name": user.name,
-        "email": user.email
-    })
+        return jsonify({
+            "id": user.id,
+            "name": user.name,
+            "email": user.email
+        })
+
+    finally:
+        session.close()
 
 
 # SEARCH BY NAME
@@ -110,43 +161,26 @@ def search_users():
     name = request.args.get("name", "")
 
     session = Session()
-    users = session.query(User).filter(User.name.like(f"%{name}%")).all()
-    session.close()
+    try:
+        users = session.query(User).filter(User.name.like(f"%{name}%")).all()
 
-    return jsonify([
-        {"id": u.id, "name": u.name, "email": u.email}
-        for u in users
-    ])
+        return jsonify([
+            {"id": u.id, "name": u.name, "email": u.email}
+            for u in users
+        ])
+
+    finally:
+        session.close()
 
 
 # COUNT USERS
 @user_bp.route('/count', methods=['GET'])
 def count_users():
     session = Session()
-    count = session.query(User).count()
-    session.close()
+    try:
+        count = session.query(User).count()
+        return jsonify({"count": count})
 
-    return jsonify({"count": count})
-
-
-# LOGIN
-@user_bp.route('/login', methods=['POST'])
-def login():
-    session = Session()
-    data = request.json
-
-    user = session.query(User).filter(
-        User.email == data["email"],
-        User.password_hash == data["password"]
-    ).first()
-
-    session.close()
-
-    if not user:
-        return jsonify({"error": "invalid credentials"}), 401
-
-    return jsonify({
-        "message": "login success",
-        "user_id": user.id
-    })
+    finally:
+        session.close()
 

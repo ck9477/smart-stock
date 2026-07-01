@@ -30,15 +30,28 @@ def extract_product_name(text, code):
     text = re.sub(r'\d+\.\d+', '', text)
     text = re.sub(r'\d+%', '', text)
 
-    junk = ["חי", "חשי", "רג", "יש", "ק", "ג"]
+    text = re.sub(r'\d+ב\d+', ' ', text)
+    text = re.sub(r'\d+\s*ב\s*\d+', ' ', text)
 
-    for j in junk:
-        text = re.sub(rf'\b{j}\b', '', text)
+    text = re.sub(r'\b(\d+)\s+\1\b', ' ', text)
+    text = re.sub(r'\b\d+\s+\d+\b', ' ', text)
+    text = re.sub(r'\b\d+\s*X\s*\d+\b', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b\d+\s*\*\s*\d+\b', ' ', text)
+    text = re.sub(r'\b\d+\s*[xX]\s*\d+\b', ' ', text)
+    text = re.sub(r'\b\d+\s*\+\s*\d+\b', ' ', text)
 
     text = re.sub(r'[-*/"(),.:]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
 
     text = get_display(text)
+
+    text = re.sub(r'^\s*\d+\s+', '', text)
+    text = re.sub(r'\s+\d+\s*$', '', text)
+    text = re.sub(r'\b(?:מבצע|הנחה|אספקה|אספק|החזר|ספק|ישח|חשי)\b', ' ', text)
+    text = re.sub(r'\b\d+\s*[אבגדהוזחטיכלמנסעפצקרשת]{1,4}\b', ' ', text)
+    text = re.sub(r'\b(?:יח|יחידות)\b', ' ', text)
+    text = re.sub(r'\b(?:ב|ג|ק|ל|א|ה|ו)\s*$', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
 
     return text if len(text) > 2 else ""
 
@@ -46,6 +59,12 @@ def extract_product_name(text, code):
 # EXTRACT QUANTITY
 # -----------------------------
 def extract_quantity(text):
+    third_number_match = re.search(r'\b\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+(\d{1,3})\b', text)
+    if third_number_match:
+        qty = float(third_number_match.group(1))
+        if 0 < qty <= 200:
+            return int(qty), "units"
+
     match = re.search(r'\b(\d{1,2})\s+\1\b', text)
     if match:
         return int(match.group(1)), "units"
@@ -104,6 +123,8 @@ def is_real_product(name):
         "טלפון", "פקס", "כתובת", "עוסק", "מורשה",
         "משלוח", "תעודת", "הזמנה", "חשבונית", "מסמך",
         "קבלה", "סהכ", 'סה"כ', "מעמ", 'מע"מ',
+        "רחוב", "דרך", "שדרות", "כביש", "מיקוד", "עיר",
+        "ת.ד", "ת\"ד", "כתובת למשלוח", "email", "co.il",
         "tax", "total", "invoice", "receipt"
     ]
 
@@ -140,8 +161,26 @@ def parse_invoice_text(text):
         "פקס",
         "כתובת",
         "סהכ",
+        "סכום",
         "total",
-        "tax"
+        "tax",
+        "מבצע",
+        "הנחה",
+        "אספקה",
+        "הספקה",
+        "אספק",
+        "החזר",
+        "ספק",
+        "ישח",
+        "חשי",
+        "תאריך",
+        "שעה",
+        "א. עוסקים",
+        "עוסקים",
+        "מזומן",
+        "אשראי",
+        "קבלה",
+        "תשלום"
     ]
 
     for line in lines:
@@ -150,7 +189,15 @@ def parse_invoice_text(text):
         if len(line) < 6:
             continue
 
-        if any(w in line.lower() for w in skip_words):
+        display_line = get_display(line)
+
+        if any(w in display_line.lower() for w in skip_words):
+            continue
+
+        if re.search(r'-\s*\d+(?:\.\d+)?', display_line):
+            continue
+
+        if re.search(r'\b\d+\s*ב\s*\d+\b', display_line):
             continue
 
         codes = code_pattern.findall(line)
@@ -170,7 +217,13 @@ def parse_invoice_text(text):
         if not name or not is_real_product(name):
             continue
 
+        if any(term in name.lower() for term in ["מבצע", "הנחה", "אספקה", "אספק", "החזר", "ספק"]):
+            continue
+
         qty, unit = extract_quantity(line)
+        if qty <= 0:
+            continue
+
         weight = extract_weight_grams(name)
 
         items.append({
@@ -187,7 +240,7 @@ def parse_invoice_text(text):
 # MAIN
 # -----------------------------
 if __name__ == "__main__":
-    file_path = r"H:\smart-stock-project\attachments (13)\30000219419.pdf"
+    file_path = r"H:\smart-stock-project\attachments (13)\121_5218_1413803_260512_233623 (1).pdf"
 
     result = extract_single_invoice(file_path)
 
