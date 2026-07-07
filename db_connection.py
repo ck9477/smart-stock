@@ -22,7 +22,7 @@ from sqlalchemy.orm import sessionmaker
 # יצירת ה-engine
 engine = create_engine(
     f'mssql+pyodbc://@{SERVER}/{DATABASE}?driver={DRIVER}',
-    echo=True
+    echo=False
 )
 
 # יצירת סשן

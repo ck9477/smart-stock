@@ -66,27 +66,30 @@ class ReceiptService:
         }
 
     # -----------------------------
-    # FIND OR CREATE PRODUCT
+    # FIND OR CREATE PRODUCT (with OpenFoodFacts enrichment)
     # -----------------------------
     def find_or_create_product(self, raw_product):
-        code = str(raw_product.get("code", "")).strip()
-        name = str(raw_product.get("name", "")).strip()
+        code = str(raw_product.get("code", "")).strip() or None
+        name = str(raw_product.get("name", "")).strip() or None
 
-        if code:
-            product = self.product_repo.get_by_code(code)
+        # ── שלב 1–4: חיפוש מקומי + OpenFoodFacts + fuzzy ──
+        from Service.product_lookup_service import ProductLookupService
+        lookup = ProductLookupService(self.session)
+
+        result = lookup.lookup(barcode=code, name=name)
+        if result:
+            # המוצר נמצא (מקומית או דרך OpenFoodFacts)
+            product = self.product_repo.get_by_id(result["id"])
             if product:
                 return product
 
-        if name:
-            product = self.product_repo.get_by_name(name)
-            if product:
-                return product
-
+        # ── שלב 5: נפילה אחרונה — יצירת מוצר ידנית ──
         product = Product(
             name=name if name else "UNKNOWN",
-            code=code if code else None,
+            code=code,
             category_id=22,
-            volume_ml=0
+            volume_ml=0,
+            source='manual',
         )
 
         self.product_repo.add(product)
@@ -112,15 +115,14 @@ class ReceiptService:
     # PARSE RECEIPT FILE
     # -----------------------------
     def parse_receipt_file(self, receipt_file):
+        from Service.receipt_parser import extract_text_from_pdf, parse_receipt
+
         receipt_file.stream.seek(0)
         raw = receipt_file.read()
         filename = (getattr(receipt_file, "filename", "") or "").lower()
-        text = ""
 
         if filename.endswith(".pdf"):
-            with pdfplumber.open(io.BytesIO(raw)) as pdf:
-                pages = [page.extract_text() or "" for page in pdf.pages]
-                text = "\n".join(pages)
+            text = extract_text_from_pdf(raw)
         else:
             text = raw.decode("utf-8", errors="ignore")
 
@@ -128,6 +130,7 @@ class ReceiptService:
         with open("debug_receipt.txt", "w", encoding="utf-8") as f:
             f.write(text)
 
+        # Try JSON first (for programmatic uploads)
         try:
             payload = json.loads(text)
             if isinstance(payload, list):
@@ -137,7 +140,9 @@ class ReceiptService:
         except Exception:
             pass
 
-        return self.parse_invoice_text(text)
+        # Use the new dedicated parser
+        products = parse_receipt(text)
+        return self.filter_real_products(products)
 
     # -----------------------------
     # FILTER REAL PRODUCTS

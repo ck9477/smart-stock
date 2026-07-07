@@ -48,9 +48,12 @@ def extract_product_name(text, code):
     text = re.sub(r'^\s*\d+\s+', '', text)
     text = re.sub(r'\s+\d+\s*$', '', text)
     text = re.sub(r'\b(?:מבצע|הנחה|אספקה|אספק|החזר|ספק|ישח|חשי)\b', ' ', text)
+    text = re.sub(r'\b(?:מחיר\s+ליחידה|ליחידה|יחידה|יח\b)\b', ' ', text)
+    text = re.sub(r'\b(\d+(?:\.\d+)?)\s*(?:ק"ג|קג)\b', r'\1 ק"ג', text)
+    text = re.sub(r'(?<!\d)\s+(?:ק"ג|קג)\b', ' ', text)
+    text = re.sub(r'^\s*(?:ב|ג|ק|ל|א|ה|ו)\s+', '', text)
+    text = re.sub(r'\s+(?:ב|ג|ק|ל|א|ה|ו)\s*$', '', text)
     text = re.sub(r'\b\d+\s*[אבגדהוזחטיכלמנסעפצקרשת]{1,4}\b', ' ', text)
-    text = re.sub(r'\b(?:יח|יחידות)\b', ' ', text)
-    text = re.sub(r'\b(?:ב|ג|ק|ל|א|ה|ו)\s*$', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
 
     return text if len(text) > 2 else ""
@@ -240,7 +243,7 @@ def parse_invoice_text(text):
 # MAIN
 # -----------------------------
 if __name__ == "__main__":
-    file_path = r"H:\smart-stock-project\attachments (13)\121_5218_1413803_260512_233623 (1).pdf"
+    file_path = r"H:\smart-stock-project\attachments (13)\30000138237.pdf"
 
     result = extract_single_invoice(file_path)
 
