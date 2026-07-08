@@ -8,6 +8,7 @@ sys.path.insert(0, os.getcwd())
 from db_connection import SessionLocal
 from Service.receipt_service import ReceiptService
 from werkzeug.datastructures import FileStorage
+from werkzeug.security import generate_password_hash
 import models.users  # ensure users table is registered in metadata
 
 # choose file from attachments
@@ -27,7 +28,7 @@ try:
 
     user = session.query(User).filter(User.id == 1).first()
     if not user:
-        user = User(name='imported_user', email=f'import_{os.getpid()}@local', password_hash='x')
+        user = User(name='imported_user', email=f'import_{os.getpid()}@local', password_hash=generate_password_hash('x'))
         session.add(user)
         session.flush()
     result = service.process_receipt(fs, user_id=user.id)

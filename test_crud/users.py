@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from models.users import  User
 from models.base import Base
 from Repository.users import UserRepository
+from werkzeug.security import generate_password_hash
 session = SessionLocal()  # הסשן שאת מייבאת לכל מקום
 
 # יצירת טבלאות
@@ -21,7 +22,7 @@ repo = UserRepository(session)
 # CREATE - הוספת משתמש חדש
 # -------------------------------
 
-new_user = User(name="נעמי", email="N@gmail.com", password_hash="325655899")
+new_user = User(name="נעמי", email="N@gmail.com", password_hash=generate_password_hash("325655899"))
 repo.add_user(new_user)
 print("Created User:", new_user.id, new_user.name)
 
