@@ -66,11 +66,14 @@ class ProductLookupService:
         if not product and name and HAS_FUZZY:
             product = self._by_fuzzy(name, threshold=fuzzy_threshold)
 
+        # Default category: 33 (מוצרי יסוד) — always exists
+        _cat = category_id if self._category_exists(category_id) else 33
+
         # שלב 4: משיכה מ-OpenFoodFacts
         if not product and barcode:
             off_data = self.off_adapter.fetch_by_barcode(barcode)
             if off_data and off_data.get("name"):
-                saved_id = self.off_adapter.save_to_db(off_data, category_id)
+                saved_id = self.off_adapter.save_to_db(off_data, _cat)
                 if saved_id:
                     product = self._by_id(saved_id)
 
@@ -78,7 +81,7 @@ class ProductLookupService:
             off_results = self.off_adapter.search_by_name(name, page_size=3)
             for off_data in off_results:
                 if off_data.get("name"):
-                    saved_id = self.off_adapter.save_to_db(off_data, category_id)
+                    saved_id = self.off_adapter.save_to_db(off_data, _cat)
                     if saved_id:
                         product = self._by_id(saved_id)
                         break
@@ -103,7 +106,7 @@ class ProductLookupService:
         self,
         name: str,
         barcode: Optional[str] = None,
-        category_id: int = 1,
+        category_id: int = 33,
         off_category: Optional[str] = None,
         off_brand: Optional[str] = None,
     ) -> int:
@@ -132,7 +135,17 @@ class ProductLookupService:
         return new_id
 
     # ── שאילתות פנימיות ───────────────────────────────────
+    def _category_exists(self, category_id: int) -> bool:
+        row = self.session.execute(
+            text("""
+                SELECT id
+                FROM category
+                WHERE id = :id
+            """),
+            {"id": category_id},
+        ).first()
 
+        return row is not None
     def _by_barcode(self, barcode: str) -> Optional[Dict[str, Any]]:
         row = self.session.execute(
             text("""

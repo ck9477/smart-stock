@@ -84,10 +84,11 @@ class ReceiptService:
                 return product
 
         # ── שלב 5: נפילה אחרונה — יצירת מוצר ידנית ──
+        category_id = self._guess_category(name) if name else 33
         product = Product(
             name=name if name else "UNKNOWN",
             code=code,
-            category_id=22,
+            category_id=category_id,
             volume_ml=0,
             source='manual',
         )
@@ -96,6 +97,83 @@ class ReceiptService:
         self.session.flush()
         self.session.refresh(product)
         return product
+
+    # -----------------------------
+    # CATEGORY GUESSER (when OpenFoodFacts is unavailable)
+    # -----------------------------
+    def _guess_category(self, name: str) -> int:
+        """מנחש קטגוריה לפי מילות מפתח בשם המוצר."""
+        name_lower = name.strip()
+
+        # 28 = פירות וירקות טריים
+        fruits_veg = [
+            "עגבני", "מלפפון", "חציל", "בצל", "תפוח", "אגס", "בננה", "אבטיח",
+            "מלון", "ענב", "תות", "קלמנטי", "תפוז", "לימון", "אשכולי",
+            "גזר", "כרוב", "חסה", "פלפל", "פטרוז", "קישוא", "דלעת",
+            "סלק", "צנון", "שום", "אבוקדו", "מנגו", "קיווי", "שזיף",
+            "אפרסק", "משמש", "נקטרי", "צבר", "פסיפלו", "רימון",
+            "תמר", "תאנה", "זית", "בטטה", "תפו\"א", "תפוח אדמה",
+        ]
+        if any(w in name_lower for w in fruits_veg):
+            return 28
+
+        # 30 = חלב וביצים / 29 = מוצרי חלב טריים
+        dairy = ["חלב", "שמנת", "יוגורט", "גבינ", "לבן", "אשל", "קוטג'", "ביצ"]
+        if any(w in name_lower for w in dairy):
+            return 30
+
+        # 31 = לחמים ותחליפי פחמימה
+        bread = ["לחם", "חלה", "פיתה", "לחמני", "בייגל", "קרקר", "מצה", "בורגול", "קוסקוס", "קמח"]
+        if any(w in name_lower for w in bread):
+            return 31
+
+        # 32 = משקאות קלים
+        drinks = ["קולה", "מיץ", "משקה", "סודה", "מים", "ספרינג", "פפסי", "שוקו", "קקאו",
+                  "בירה", "יין", "שתייה", "שתיה", "אנרגיה"]
+        if any(w in name_lower for w in drinks):
+            return 32
+
+        # 35 = אורז ופסטות
+        grains = ["פסטה", "ספגטי", "מקרוני", "אורז", "אטריות", "נודלס", "פתיתים", "קוסקוס"]
+        if any(w in name_lower for w in grains):
+            return 35
+
+        # 34 = שימורים ורטבים
+        canned = ["שימורי", "טונה", "רסק", "קטשופ", "מיונז", "חרדל", "סילאן",
+                  "רוטב", "זיתים", "קורנפלור", "מלפפון חמוץ", "סויה"]
+        if any(w in name_lower for w in canned):
+            return 34
+
+        # 36 = מוצרי ניקיון
+        cleaning = ["נוזל רצפות", "סבון כלים", "מרכך כביסה", "אקונומיקה", "חומר ניקוי",
+                    "ספוג", "מגבון", "שמפו", "סבון", "משחת שיניים", "דאודורנט",
+                    "מרכך שיער", "ג'ל", "קרם גוף", "תרחיץ"]
+        if any(w in name_lower for w in cleaning):
+            return 36
+
+        # 29 = מוצרי חלב טריים (גבינות ספציפיות)
+        cheese = ["צהובה", "גבינה", "בולגרית", "צפתית", "מוצרלה", "פרמזן", "גאודה", "עמק"]
+        if any(w in name_lower for w in cheese):
+            return 29
+
+        # 27 = מאפים טריים
+        bakery = ["עוגה", "עוגי", "בורקס", "קרואסון", "רוגלך", "סופגני", "דונאט"]
+        if any(w in name_lower for w in bakery):
+            return 27
+
+        # 33 = מוצרי יסוד
+        staples = ["סוכר", "מלח", "שמן", "קמח", "קטניות", "עדשים", "שעועית",
+                   "חומוס", "תירס", "אפונה"]
+        if any(w in name_lower for w in staples):
+            return 33
+
+        # 42 = חומרי ניקוי
+        heavy_cleaning = ["אקונומיקה", "נוזל כלים", "מסיר שומנים", "ספריי"]
+        if any(w in name_lower for w in heavy_cleaning):
+            return 42
+
+        # defaultgit
+        return 33
 
     # -----------------------------
     # AMOUNT PARSER

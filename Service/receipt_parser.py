@@ -80,17 +80,14 @@ def parse_mehadrin(text: str) -> list[dict]:
             continue
         seen_codes.add(code)
 
-        # ── Extract the 3 decimal numbers (in RAW order: total, unit, qty) ──
+        # ── Extract the 3 decimal numbers (in RAW order: total, unit_price, qty) ──
         # RAW: 22.90 22.90 1.00 <name> <code> <num>
         # The THREE decimal numbers at the start (in raw) are: total, unit_price, quantity
-        # We want the THIRD one (quantity) — in raw order it's the one closest to the name
         all_nums = re.findall(r'\b(\d+\.\d{2})\b', line)
         quantity = 1
         if len(all_nums) >= 3:
             try:
                 qty_float = float(all_nums[2])
-                # For fruits/veggies, quantity is in kg (e.g. 0.69)
-                # Keep as float if < 1, otherwise round to int
                 if qty_float < 1:
                     quantity = round(qty_float, 2)
                 else:
@@ -98,7 +95,6 @@ def parse_mehadrin(text: str) -> list[dict]:
             except (ValueError, IndexError):
                 quantity = 1
         elif len(all_nums) >= 1:
-            # Fallback: try to find a reasonable quantity
             for n_str in all_nums:
                 try:
                     n = int(float(n_str))
@@ -107,6 +103,33 @@ def parse_mehadrin(text: str) -> list[dict]:
                         break
                 except ValueError:
                     pass
+
+        # ── Extract weight in GRAMS ──
+        # Converts everything to grams:
+        #   kg (*1000), gram (as-is), liter (*1000), ml (as-is)
+        #   If no unit but quantity < 1 (fruits/veggies sold by kg) → qty*1000
+        weight = 0
+        weight_patterns = [
+            (r'(\d+(?:\.\d+)?)\s*(?:ק"ג|קילוגרם|קילו)', 1000),
+            (r'(\d+(?:\.\d+)?)\s*(?:גרם|גר\b)', 1),
+            (r'(\d+(?:\.\d+)?)\s*(?:ליטר|ליט\'?|רטיל)', 1000),
+            (r'(\d+(?:\.\d+)?)\s*(?:מ"ל|מיליליטר)', 1),
+        ]
+        for pattern, multiplier in weight_patterns:
+            m = re.search(pattern, display)
+            if m:
+                try:
+                    weight = round(float(m.group(1)) * multiplier)
+                except ValueError:
+                    pass
+                break
+
+        # Fruits/veggies (9xxxxxxx) sold by kg — convert quantity to grams
+        if weight == 0 and code.startswith('9') and len(code) == 8 and isinstance(quantity, float):
+            weight = round(quantity * 1000)
+        # If quantity looks like kg (< 1) but no weight unit found
+        elif weight == 0 and isinstance(quantity, float) and quantity < 1:
+            weight = round(quantity * 1000)
 
         # ── Extract product name ──
         # The name is between the code and the 3 decimal numbers
@@ -137,14 +160,109 @@ def parse_mehadrin(text: str) -> list[dict]:
         # Filter out non-product names
         noise = ["תעודת", "משלוח", "חשבונית", "סהכ", 'סה"כ', "מע\"מ",
                  "מעמ", "טלפון", "פקס", "כתובת", "invoice", "receipt",
-                 "אספקה", "הספקה"]
+                 "אספקה", "הספקה", "דמי", "משלוח"]
         if any(n in name for n in noise) or len(name) < 3:
+            continue
+
+        # ── Remove unit markers from product name ──
+        # Mehadrin appends unit info like "ק\"ג", "גרם", "ליטר", "מ\"ל", "יחידה" etc.
+        # These are NOT part of the product name and should be stripped.
+        unit_markers = [
+            # kg
+            r'\bק"ג\b', r'\bג"ק\b',
+            # liter / gallon
+            r'\bליטר\b', r'\bרטיל\b',
+            r'\bליט\'?\.?\b', r'\b\'?\.?טיל\b',
+            r'\bגלון\b', r'\bןולג\b',
+            r'\bוא\'?ג\b', r'\bג\'?או\b',   # gallon abbreviation
+            # ml
+            r'\bמ"ל\b', r'\bל"מ\b',
+            # gram (full + abbreviations)
+            r'\bגרם\b', r'\bםרג\b',
+            r'\bגר\'?\.?\b', r'\b\'?\.?רג\b',
+            r'\bג\'\.?\b',                     # just 'ג' for gram
+            # unit
+            r'\bיחידה\b', r'\bהדיחי\b',
+            r'\bיח\'\.?\b', r'\b\'?\.?חי\b',
+            r'\bליחידה\b', r'\bהדיחיל\b',     # "per unit"
+            r'\bיחידות\b', r'\bתודיחי\b',     # units (plural)
+            # pack
+            r'\bמארז\b', r'\bזראמ\b',
+            # box / can
+            r'\bקופסה\b', r'\bהספוק\b',
+            r'\bקופסת\b', r'\bתספוק\b',
+            r'\bפחית\b', r'\bתיחפ\b',        # can/tin
+            r'\bפח\b', r'\bחפ\b',             # tin abbreviation
+            # bottle
+            r'\bבקבוק\b', r'\bקוקבב\b',
+            # bag / sachet
+            r'\bשקית\b', r'\bתיקש\b',
+            # piece / bead
+            r'\bיחל״צ\b', r'\bצ״לחי\b',      # piece abbreviation
+        ]
+        for pattern in unit_markers:
+            name = re.sub(pattern, '', name)
+
+        # Clean up extra spaces from unit removal
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        # Remove stray single-character unit remnants at end of name
+        # (e.g. 'ל' from 'מ\"ל', 'ג' from gram, 'א' etc.)
+        # Only if preceded by a digit — that confirms it's a unit leftover
+        name = re.sub(r'\s*\d+\s*[א-ת]\s*$', '', name)
+        # Also remove trailing lone characters that are unit leftovers
+        name = re.sub(r'\s*\d+\s*\'?\s*$', '', name)
+        # Remove leftover number at end (e.g. "1.19" that was part of unit)
+        name = re.sub(r'\s+\d+\.\d{2}\s*$', '', name)
+
+        # Remove noise words like "מחיר ל..." leftovers
+        name = re.sub(r'\bמחיר\b', '', name)
+        name = re.sub(r'\bריחמ\b', '', name)  # reversed
+
+        # Remove leading leftover numbers + english word (like "4 calm", "2 pack")
+        name = re.sub(r'^\d+\s+[a-zA-Z]+\s*', '', name)
+        # Remove leading english-only words BUT preserve product codes like TnX, XL
+        # English words that are product brands (<=4 chars, all caps or mixed case)
+        if not re.match(r'^[A-Za-z]{2,4}\s', name):
+            name = re.sub(r'^[a-zA-Z]+\s+', '', name)
+        else:
+            # It's a brand name — keep it, just clean surrounding mess
+            pass
+
+        # Remove leftover unit abbreviations in RTL
+        name = re.sub(r'\bל"ג\b', '', name)    # ml reversed
+        name = re.sub(r'\bג"ל\b', '', name)
+        # Remove "ל'ג" / "ג'ל" (jerry can unit), "ל'ט" / "ט'ל" (liter alt)
+        name = re.sub(r'\bל\'ג\b', '', name)
+        name = re.sub(r'\bג\'ל\b', '', name)
+        name = re.sub(r'\bל\'ט\b', '', name)
+        name = re.sub(r'\bט\'ל\b', '', name)
+
+        # Remove trailing single-letter leftovers after cleanup
+        # BUT preserve patterns like "מס' 8" (product number) — only strip
+        # single letter if it's not part of "מס' X"
+        name = re.sub(r'\s+[א-ת]\s*$', '', name)
+        # Remove stray quotes and partial numbers left from unit removal
+        name = re.sub(r'\s+\d+\s*\'+\s*', ' ', name)       # e.g. "240 '"
+        # Remove trailing number only if it's clearly a unit leftover
+        # But preserve "מס' 8" pattern (product numbering)
+        name = re.sub(r'(?<!\')\s+\d+\.?\s*$', '', name)
+        name = re.sub(r'\s+\d+\.\d+\s*$', '', name)        # float leftovers
+        name = re.sub(r'\s+\'+\s*$', '', name)
+        # Restore missing numbers after "מס'" if they were removed
+        name = re.sub(r'\b(מס\')\s*$', r'\1', name)
+
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        # Re-check length after unit removal
+        if len(name) < 3:
             continue
 
         items.append({
             "code": code,
             "name": name,
             "quantity": quantity,
+            "weight": weight,
         })
 
     return items
@@ -287,6 +405,7 @@ def parse_generic(text: str) -> list[dict]:
             "code": code,
             "name": name,
             "quantity": quantity,
+            "weight": 0,
         })
 
     return items
