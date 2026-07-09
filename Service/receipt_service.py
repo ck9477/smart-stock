@@ -85,7 +85,7 @@ class ReceiptService:
         product = Product(
             name=name if name else "UNKNOWN",
             code=code if code else None,
-            category_id=22,
+            category_id=8,
             volume_ml=0
         )
 

@@ -4,14 +4,12 @@ from sqlalchemy import create_engine
 
 from models.shopping_list import ShoppingList
 from Service.shopping_service import generate_shopping_list
-
+from config import get_sqlalchemy_connection_string
 
 # -----------------------------
 # DB Engine
 # -----------------------------
-engine = create_engine(
-    'mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server'
-)
+engine = create_engine(get_sqlalchemy_connection_string())
 
 Session = sessionmaker(bind=engine)
 

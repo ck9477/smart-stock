@@ -1,31 +1,27 @@
+import pymssql
+from config import (
+    DB_SERVER, DB_PORT, DB_NAME, DB_USERNAME, DB_PASSWORD,
+    get_sqlalchemy_connection_string,
+)
 
-
-import pyodbc
-SERVER = 'D403-005'
-DATABASE = 'SmartStock'
-DRIVER='ODBC Driver 17 for SQL Server'
 def get_connection():
- conn_str = (
- f'DRIVER={{{DRIVER}}};'
- f'SERVER={SERVER};'
- f'DATABASE={DATABASE};'
- f'Trusted_Connection=yes;'
- )
- return pyodbc.connect(conn_str)
-conn=get_connection()
-cursor =conn.cursor()
+    return pymssql.connect(
+        server=DB_SERVER,
+        port=DB_PORT,
+        user=DB_USERNAME,
+        password=DB_PASSWORD,
+        database=DB_NAME,
+        as_dict=False,
+    )
+
+conn = get_connection()
+cursor = conn.cursor()
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+engine = create_engine(get_sqlalchemy_connection_string(), echo=True)
 
-# יצירת ה-engine
-engine = create_engine(
-    f'mssql+pyodbc://@{SERVER}/{DATABASE}?driver={DRIVER}',
-    echo=True
-)
-
-# יצירת סשן
 SessionLocal = sessionmaker(bind=engine)
 
 from flask import Flask

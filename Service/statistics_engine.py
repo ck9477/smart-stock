@@ -1,15 +1,18 @@
-import pyodbc
+import pymssql
 from datetime import datetime
 from collections import defaultdict
+from config import DB_SERVER, DB_PORT, DB_NAME, DB_USERNAME, DB_PASSWORD
 
 
 class StatisticsEngine:
     def __init__(self):
-        self.conn = pyodbc.connect(
-            "DRIVER={SQL Server};"
-            "SERVER=localhost;"
-            "DATABASE=SmartStock;"
-            "Trusted_Connection=yes;"
+        self.conn = pymssql.connect(
+            server=DB_SERVER,
+            port=DB_PORT,
+            user=DB_USERNAME,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            as_dict=False,
         )
 
     def fetch_data(self, user_id):

@@ -10,4 +10,4 @@ class Receipt(Base):
         ForeignKey("dbo.users.id", ondelete="CASCADE"),
         nullable=False
     )
-    receipt_date = Column(DateTime, nullable=False, server_default=func.now())
+    receipt_date = Column(DateTime, nullable=True, server_default=func.sysdatetime())

@@ -1,0 +1,6 @@
+.env
+.env.local-dev
+__pycache__
+*.pyc
+debug_receipt.txt
+debug_screenshots/

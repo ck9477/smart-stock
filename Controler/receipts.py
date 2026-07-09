@@ -8,10 +8,9 @@ from models.Reception_products import ReceptionProducts
 from models.Products import Product
 import io
 import os
+from config import get_sqlalchemy_connection_string
 
-engine = create_engine(
-    'mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server'
-)
+engine = create_engine(get_sqlalchemy_connection_string())
 Session = sessionmaker(bind=engine)
 
 receipt_bp = Blueprint('receipts', __name__, url_prefix='/receipts')
