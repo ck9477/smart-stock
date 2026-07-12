@@ -1,8 +1,7 @@
 ﻿import io
 import json
-import pdfplumber
 import re
-from bidi.algorithm import get_display
+from datetime import datetime
 
 from models.Products import Product
 from models.receipts import Receipt
@@ -10,6 +9,7 @@ from models.Reception_products import ReceptionProducts
 from Repository.Products import ProductRepository
 from Repository.receipts import ReceiptRepository
 from Repository.Reception_products import ReceptionProductsRepository
+
 
 
 class ReceiptService:
@@ -23,12 +23,29 @@ class ReceiptService:
     # -----------------------------
     # MAIN FLOW
     # -----------------------------
+    def create_receipt(self, user_id: int, receipt_date=None):
+        """
+        Create an empty receipt (e.g. for manual entry).
+        receipt_date: datetime or None (defaults to today).
+        """
+        if receipt_date is None:
+            receipt_date = self._resolve_date(None)
+        receipt = Receipt(user_id=user_id, receipt_date=receipt_date)
+        self.receipt_repo.add_receipt(receipt)
+        self.session.commit()
+        return receipt.id
+
     def process_receipt(self, receipt_file, user_id: int):
-        products = self.parse_receipt_file(receipt_file)
+        from Service.receipt_parser import parse_receipt
+        text = self._read_receipt_text(receipt_file)
+        products, parsed_date = parse_receipt(text)
+
         if not products:
             raise ValueError("No products found in receipt")
 
-        receipt = Receipt(user_id=user_id)
+        receipt_date = self._resolve_date(parsed_date)
+
+        receipt = Receipt(user_id=user_id, receipt_date=receipt_date)
         self.receipt_repo.add_receipt(receipt)
         self.session.flush()
         self.session.refresh(receipt)
@@ -62,6 +79,7 @@ class ReceiptService:
 
         return {
             "receipt_id": receipt_id,
+            "receipt_date": receipt_date.isoformat(),
             "products": products_response
         }
 
@@ -78,9 +96,10 @@ class ReceiptService:
 
         result = lookup.lookup(barcode=code, name=name)
         if result:
-            # המוצר נמצא (מקומית או דרך OpenFoodFacts)
             product = self.product_repo.get_by_id(result["id"])
             if product:
+                # ⚠️ Override bad OFF name with the receipt name if better
+                product = self._prefer_receipt_name(product, name)
                 return product
 
         # ── שלב 5: נפילה אחרונה — יצירת מוצר ידנית ──
@@ -96,6 +115,42 @@ class ReceiptService:
         self.product_repo.add(product)
         self.session.flush()
         self.session.refresh(product)
+        return product
+
+    # -----------------------------
+    # PREFER RECEIPT NAME OVER BAD OFF NAMES
+    # -----------------------------
+    @staticmethod
+    def _prefer_receipt_name(product, receipt_name: str):
+        """
+        If the DB product name came from OpenFoodFacts and is in a foreign
+        language while the receipt has a good Hebrew name — upgrade it.
+        Only updates when:
+        - receipt_name has Hebrew characters
+        - the current name has NO Hebrew (pure English/French/etc.)
+        """
+        if not receipt_name or len(receipt_name) < 3:
+            return product
+
+        current_name = (product.name or "").strip()
+        if not current_name:
+            return product
+
+        has_hebrew = any('֐' <= c <= '׿' for c in receipt_name)
+        no_hebrew_current = not any('֐' <= c <= '׿' for c in current_name)
+
+        if has_hebrew and no_hebrew_current:
+            product.name = receipt_name[:50]
+            # Keep source as-is; only update if it was 'openfoodfacts'
+            # (CK_products_source constraint allows: manual, openfoodfacts, import)
+            if product.source == 'openfoodfacts':
+                product.source = 'manual'
+            # Persist immediately so the fix is saved to DB
+            from sqlalchemy.orm import object_session
+            sess = object_session(product)
+            if sess:
+                sess.flush()
+
         return product
 
     # -----------------------------
@@ -192,8 +247,9 @@ class ReceiptService:
     # -----------------------------
     # PARSE RECEIPT FILE
     # -----------------------------
-    def parse_receipt_file(self, receipt_file):
-        from Service.receipt_parser import extract_text_from_pdf, parse_receipt
+    def _read_receipt_text(self, receipt_file) -> str:
+        """Extract raw text from receipt file (PDF or plain text)."""
+        from Service.receipt_parser import extract_text_from_pdf
 
         receipt_file.stream.seek(0)
         raw = receipt_file.read()
@@ -208,6 +264,25 @@ class ReceiptService:
         with open("debug_receipt.txt", "w", encoding="utf-8") as f:
             f.write(text)
 
+        return text
+
+    @staticmethod
+    def _resolve_date(parsed_date: str | None):
+        """Fallback to today if the parser couldn't find a date."""
+        if parsed_date:
+            try:
+                return datetime.strptime(parsed_date, "%Y-%m-%d")
+            except ValueError:
+                pass
+        # Default: today at midnight
+        return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def parse_receipt_file(self, receipt_file):
+        """Legacy wrapper — returns only products (for direct JSOn upload)."""
+        from Service.receipt_parser import parse_receipt
+
+        text = self._read_receipt_text(receipt_file)
+
         # Try JSON first (for programmatic uploads)
         try:
             payload = json.loads(text)
@@ -218,8 +293,8 @@ class ReceiptService:
         except Exception:
             pass
 
-        # Use the new dedicated parser
-        products = parse_receipt(text)
+        # Use the new dedicated parser (ignore date for legacy callers)
+        products, _ = parse_receipt(text)
         return self.filter_real_products(products)
 
     # -----------------------------

@@ -1,4 +1,7 @@
-from flask import Blueprint, request, jsonify
+import json
+import queue
+import threading
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from werkzeug.datastructures import FileStorage
@@ -8,6 +11,7 @@ from models.Reception_products import ReceptionProducts
 from models.Products import Product
 import io
 import os
+from datetime import datetime
 
 engine = create_engine(
     'mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server'
@@ -28,11 +32,218 @@ def create():
             return jsonify({"error": "user_id is required"}), 400
 
         user_id = data["user_id"]
+        receipt_date_str = data.get("receipt_date")  # optional: "YYYY-MM-DD"
+        receipt_date = None
+        if receipt_date_str:
+            try:
+                receipt_date = datetime.strptime(receipt_date_str, "%Y-%m-%d")
+            except ValueError:
+                return jsonify({"error": "Invalid date format, expected YYYY-MM-DD"}), 400
+
         service = ReceiptService(session)
-        receipt_id = service.create_receipt(user_id=user_id)
-        return jsonify({"id": receipt_id})
+        receipt_id = service.create_receipt(user_id=user_id, receipt_date=receipt_date)
+        return jsonify({"id": receipt_id, "receipt_date": (receipt_date or datetime.now()).strftime("%Y-%m-%d")})
     finally:
         session.close()
+
+@receipt_bp.route('/upload-stream', methods=['POST'])
+def upload_stream():
+    """
+    SSE endpoint — העלאת קבלה עם דיווח התקדמות בזמן אמת.
+
+    גוף בקשה (multipart/form-data):
+    - receipt: קובץ הקבלה (PDF/טקסט)
+    - user_id: מזהה המשתמש
+
+    מחזיר: text/event-stream
+    """
+    receipt_file = request.files.get("receipt")
+    user_id = request.form.get("user_id") or request.args.get("user_id")
+
+    if receipt_file is None:
+        receipt_path = request.form.get("receipt") if not receipt_file else None
+        if receipt_path:
+            receipt_path = receipt_path.strip()
+            try:
+                with open(receipt_path, 'rb') as f:
+                    raw_bytes = f.read()
+                receipt_file = FileStorage(
+                    stream=io.BytesIO(raw_bytes),
+                    filename=os.path.basename(receipt_path),
+                    content_type='application/octet-stream'
+                )
+            except Exception as exc:
+                return jsonify({"error": f"Failed to open receipt path: {exc}"}), 400
+
+    if receipt_file is None:
+        return jsonify({"error": "No receipt file provided"}), 400
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
+    try:
+        user_id = int(user_id)
+    except ValueError:
+        return jsonify({"error": "user_id must be an integer"}), 400
+
+    # קוראים את הקובץ לזיכרון (צריך בשביל ה-thread)
+    raw_bytes_copy = io.BytesIO(receipt_file.read())
+    original_filename = getattr(receipt_file, 'filename', 'unknown')
+    original_content_type = getattr(receipt_file, 'content_type', 'application/octet-stream')
+
+    progress_queue = queue.Queue()
+
+    def process_thread():
+        session = Session()
+        try:
+            progress_queue.put({"type": "start", "stage": "קורא קובץ..."})
+
+            from Service.receipt_parser import parse_receipt
+            from Service.receipt_service import ReceiptService
+
+            service = ReceiptService(session)
+
+            # שלב 1: חילוץ טקסט
+            progress_queue.put({"type": "progress", "stage": "extracting", "message": "מחלץ טקסט מהקובץ..."})
+            text = service._read_receipt_text(
+                FileStorage(stream=raw_bytes_copy, filename=original_filename, content_type=original_content_type)
+            )
+
+            # שלב 2: Parsing
+            progress_queue.put({"type": "progress", "stage": "parsing", "message": "מפענח מוצרים..."})
+            products, parsed_date = parse_receipt(text)
+
+            if not products:
+                progress_queue.put({"type": "error", "error": "לא נמצאו מוצרים בקבלה"})
+                return
+
+            total = len(products)
+            progress_queue.put({"type": "start_items", "total": total, "message": f"נמצאו {total} מוצרים, מתחיל לזהות..."})
+
+            # יצירת קבלה
+            receipt_date = service._resolve_date(parsed_date)
+            receipt = Receipt(user_id=user_id, receipt_date=receipt_date)
+            service.receipt_repo.add_receipt(receipt)
+            session.flush()
+            session.refresh(receipt)
+            receipt_id = receipt.id
+
+            reception_items = []
+            results = []
+
+            # שלב 3: עיבוד כל מוצר (השלב הכי כבד)
+            for idx, raw_product in enumerate(products):
+                product_name = str(raw_product.get("name", "")) or "מוצר לא ידוע"
+                product_code = str(raw_product.get("code", ""))
+
+                progress_queue.put({
+                    "type": "item_progress",
+                    "current": idx + 1,
+                    "total": total,
+                    "product_name": product_name,
+                    "product_code": product_code,
+                    "status": "מזהה...",
+                })
+
+                try:
+                    product = service.find_or_create_product(raw_product)
+                    amount = service.parse_amount(raw_product.get("quantity", 1))
+                    reception_item = ReceptionProducts(
+                        receipts_id=receipt_id,
+                        products_id=product.id,
+                        amount=amount
+                    )
+                    reception_items.append(reception_item)
+                    results.append({
+                        "reception_id": None,
+                        "product_id": product.id,
+                        "product_code": product.code,
+                        "name": product.name,
+                        "amount": amount,
+                    })
+
+                    progress_queue.put({
+                        "type": "item_done",
+                        "current": idx + 1,
+                        "total": total,
+                        "product_name": product.name,
+                        "product_code": product.code,
+                        "success": True,
+                    })
+
+                except Exception as e:
+                    results.append({
+                        "product_name": product_name,
+                        "product_code": product_code,
+                        "success": False,
+                        "error": str(e),
+                    })
+
+                    progress_queue.put({
+                        "type": "item_done",
+                        "current": idx + 1,
+                        "total": total,
+                        "product_name": product_name,
+                        "product_code": product_code,
+                        "success": False,
+                        "error": str(e),
+                    })
+
+            # שלב 4: שמירה סופית
+            progress_queue.put({"type": "progress", "stage": "saving", "message": "שומר למסד נתונים..."})
+            service.reception_repo.add_items(reception_items)
+            session.commit()
+
+            for item, response_item in zip(reception_items, results):
+                response_item["reception_id"] = item.id
+
+            progress_queue.put({
+                "type": "done",
+                "receipt_id": receipt_id,
+                "receipt_date": receipt_date.isoformat(),
+                "products": results,
+            })
+
+        except Exception as e:
+            progress_queue.put({"type": "error", "error": str(e)})
+        finally:
+            session.close()
+
+    def generate():
+        thread = threading.Thread(target=process_thread, daemon=True)
+        thread.start()
+
+        while True:
+            try:
+                msg = progress_queue.get(timeout=30.0)
+                # מוציאים שדות לא סריאליזביליים (כגון datetime)
+                clean_msg = {}
+                for k, v in msg.items():
+                    try:
+                        json.dumps({k: v})
+                        clean_msg[k] = v
+                    except (TypeError, ValueError):
+                        clean_msg[k] = str(v)
+                yield f"data: {json.dumps(clean_msg, ensure_ascii=False)}\n\n"
+
+                if msg["type"] in ("done", "error"):
+                    break
+
+            except queue.Empty:
+                yield f": heartbeat\n\n"
+
+        thread.join(timeout=10)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
 
 @receipt_bp.route('/upload', methods=['POST'])
 def upload():
@@ -210,7 +421,8 @@ def get_by_user_id(user_id):
         return jsonify([
             {
                 "id": item.id,
-                "user_id": item.user_id
+                "user_id": item.user_id,
+                "receipt_date": item.receipt_date.isoformat() if item.receipt_date else None
             } for item in items
         ])
     finally:

@@ -6,6 +6,7 @@ Receipt Parser — dedicated extraction functions per receipt type.
 """
 import io
 import re
+from datetime import datetime
 import pdfplumber
 from bidi.algorithm import get_display
 
@@ -415,12 +416,55 @@ def parse_generic(text: str) -> list[dict]:
 # 3. ROUTER — dispatches to the correct parser
 # ═══════════════════════════════════════════════════════════════
 
-def parse_receipt(text: str) -> list[dict]:
+def _extract_date(text: str) -> str | None:
+    """
+    Try to find a purchase date hidden in the receipt text.
+    Returns ISO date string (YYYY-MM-DD) or None.
+    """
+    # Typical patterns in RTL receipts after bidi display:
+    #   17:00 5/01/21    (Shuk City: hour + DD/MM/YY)
+    #   23:22 4/01/21    (Mehadrin:   hour + DD/MM/YY)
+    #   2024-01-15       (already ISO)
+    #
+    # We look for dates with separators '/' or '-'
+    # Pattern:  DD/MM/YY  or  DD/MM/YYYY  or  YYYY-MM-DD
+
+    # 1) DD/MM/YY or DD/MM/YYYY
+    matches = re.findall(r'\b(\d{1,2})[/](\d{1,2})[/](\d{2,4})\b', text)
+    for d, m, y in matches:
+        try:
+            day, month = int(d), int(m)
+            year = int(y)
+            if year < 100:
+                year += 2000
+            if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
+                return f"{year}-{month:02d}-{day:02d}"
+        except ValueError:
+            continue
+
+    # 2) YYYY-MM-DD (already ISO, fallback)
+    iso = re.findall(r'\b(\d{4})-(\d{2})-(\d{2})\b', text)
+    for y, m, d in iso:
+        try:
+            year, month, day = int(y), int(m), int(d)
+            if 2020 <= year <= 2030 and 1 <= month <= 12 and 1 <= day <= 31:
+                return f"{year}-{month:02d}-{day:02d}"
+        except ValueError:
+            continue
+
+    return None
+
+
+def parse_receipt(text: str) -> tuple[list[dict], str | None]:
     """
     Parse any receipt. Automatically detects type and uses the best parser.
 
-    Returns list of dicts: {code, name, quantity}
+    Returns (list of dicts: {code, name, quantity}, date: ISO str | None)
     """
     if is_mehadrin_receipt(text):
-        return parse_mehadrin(text)
-    return parse_generic(text)
+        items = parse_mehadrin(text)
+    else:
+        items = parse_generic(text)
+
+    receipt_date = _extract_date(text)
+    return items, receipt_date

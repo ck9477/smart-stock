@@ -3,6 +3,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 
 from models.shopping_list import ShoppingList
+from models.Products import Product
+from models.Range import Range
 from Service.shopping_service import generate_shopping_list
 
 # -----------------------------
@@ -63,17 +65,21 @@ def get_all_by_user(user_id):
         if not items:
             return jsonify({"error": "not found"}), 404
 
-        return jsonify(
-            [
-                {
-                    "id": i.id,
-                    "product_id": i.product_id,
-                    "amount": i.amount,
-                    "range_enum": i.range_enum,
-                }
-                for i in items
-            ]
-        )
+        result = []
+        for i in items:
+            product = session.query(Product).filter(Product.id == i.product_id).first()
+            range_obj = session.query(Range).filter(Range.id == i.range_enum).first()
+
+            result.append({
+                "id": i.id,
+                "product_id": i.product_id,
+                "product_name": product.name if product else "לא ידוע",
+                "amount": i.amount,
+                "range_enum": i.range_enum,
+                "range_name": range_obj.range_name if range_obj else "לא ידוע",
+            })
+
+        return jsonify(result)
 
     finally:
         session.close()
@@ -96,12 +102,17 @@ def get_by_id(id):
         if not item:
             return jsonify({"error": "not found"}), 404
 
+        product = session.query(Product).filter(Product.id == item.product_id).first()
+        range_obj = session.query(Range).filter(Range.id == item.range_enum).first()
+
         return jsonify(
             {
                 "id": item.id,
                 "product_id": item.product_id,
+                "product_name": product.name if product else "לא ידוע",
                 "amount": item.amount,
                 "range_enum": item.range_enum,
+                "range_name": range_obj.range_name if range_obj else "לא ידוע",
             }
         )
 
