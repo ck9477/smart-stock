@@ -5,12 +5,11 @@ from sqlalchemy import create_engine
 from models.shopping_list import ShoppingList
 from Service.shopping_service import generate_shopping_list
 
-
 # -----------------------------
 # DB Engine
 # -----------------------------
 engine = create_engine(
-    'mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server'
+    "mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server"
 )
 
 Session = sessionmaker(bind=engine)
@@ -18,15 +17,13 @@ Session = sessionmaker(bind=engine)
 # -----------------------------
 # Blueprint
 # -----------------------------
-shopping_bp = Blueprint('shopping', __name__, url_prefix='/shopping')
-
+shopping_bp = Blueprint("shopping", __name__, url_prefix="/shopping")
 
 # -----------------------------
-# CREATE (בטוח יותר)
+# CREATE
 # -----------------------------
-@shopping_bp.route('', methods=['POST'])
+@shopping_bp.route("", methods=["POST"])
 def create():
-
     session = Session()
 
     try:
@@ -36,7 +33,7 @@ def create():
             user_id=data["user_id"],
             product_id=data["product_id"],
             amount=data.get("amount", 1),
-            range_enum=data.get("range_enum")
+            range_enum=data.get("range_enum"),
         )
 
         session.add(obj)
@@ -52,28 +49,31 @@ def create():
 # -----------------------------
 # GET ALL BY USER ID
 # -----------------------------
-@shopping_bp.route('/user/<int:user_id>', methods=['GET'])
+@shopping_bp.route("/user/<int:user_id>", methods=["GET"])
 def get_all_by_user(user_id):
-
     session = Session()
 
     try:
-        items = session.query(ShoppingList).filter(
-            ShoppingList.user_id == user_id
-        ).all()
+        items = (
+            session.query(ShoppingList)
+            .filter(ShoppingList.user_id == user_id)
+            .all()
+        )
 
         if not items:
             return jsonify({"error": "not found"}), 404
 
-        return jsonify([
-            {
-                "id": i.id,
-                "product_id": i.product_id,
-                "amount": i.amount,
-                "range_enum": i.range_enum
-            }
-            for i in items
-        ])
+        return jsonify(
+            [
+                {
+                    "id": i.id,
+                    "product_id": i.product_id,
+                    "amount": i.amount,
+                    "range_enum": i.range_enum,
+                }
+                for i in items
+            ]
+        )
 
     finally:
         session.close()
@@ -82,25 +82,28 @@ def get_all_by_user(user_id):
 # -----------------------------
 # GET BY ID
 # -----------------------------
-@shopping_bp.route('/<int:id>', methods=['GET'])
+@shopping_bp.route("/<int:id>", methods=["GET"])
 def get_by_id(id):
-
     session = Session()
 
     try:
-        item = session.query(ShoppingList).filter(
-            ShoppingList.id == id
-        ).first()
+        item = (
+            session.query(ShoppingList)
+            .filter(ShoppingList.id == id)
+            .first()
+        )
 
         if not item:
             return jsonify({"error": "not found"}), 404
 
-        return jsonify({
-            "id": item.id,
-            "product_id": item.product_id,
-            "amount": item.amount,
-            "range_enum": item.range_enum
-        })
+        return jsonify(
+            {
+                "id": item.id,
+                "product_id": item.product_id,
+                "amount": item.amount,
+                "range_enum": item.range_enum,
+            }
+        )
 
     finally:
         session.close()
@@ -109,17 +112,18 @@ def get_by_id(id):
 # -----------------------------
 # UPDATE
 # -----------------------------
-@shopping_bp.route('/<int:id>', methods=['PUT'])
+@shopping_bp.route("/<int:id>", methods=["PUT"])
 def update(id):
-
     session = Session()
 
     try:
         data = request.json
 
-        item = session.query(ShoppingList).filter(
-            ShoppingList.id == id
-        ).first()
+        item = (
+            session.query(ShoppingList)
+            .filter(ShoppingList.id == id)
+            .first()
+        )
 
         if not item:
             return jsonify({"error": "not found"}), 404
@@ -139,15 +143,16 @@ def update(id):
 # -----------------------------
 # DELETE
 # -----------------------------
-@shopping_bp.route('/<int:id>', methods=['DELETE'])
+@shopping_bp.route("/<int:id>", methods=["DELETE"])
 def delete(id):
-
     session = Session()
 
     try:
-        item = session.query(ShoppingList).filter(
-            ShoppingList.id == id
-        ).first()
+        item = (
+            session.query(ShoppingList)
+            .filter(ShoppingList.id == id)
+            .first()
+        )
 
         if not item:
             return jsonify({"error": "not found"}), 404
@@ -164,9 +169,8 @@ def delete(id):
 # -----------------------------
 # GENERATE SHOPPING LIST
 # -----------------------------
-@shopping_bp.route('/generate/<int:user_id>', methods=['POST'])
+@shopping_bp.route("/generate/<int:user_id>", methods=["POST"])
 def generate(user_id):
-
     session = Session()
 
     try:
