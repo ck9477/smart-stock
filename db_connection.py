@@ -4,7 +4,16 @@ from config import (
     get_sqlalchemy_connection_string,
 )
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+engine = create_engine(get_sqlalchemy_connection_string(), echo=True)
+
+SessionLocal = sessionmaker(bind=engine)
+
+
 def get_connection():
+    """Lazy raw pymssql connection — only for scripts that need it."""
     return pymssql.connect(
         server=DB_SERVER,
         port=DB_PORT,
@@ -14,15 +23,6 @@ def get_connection():
         as_dict=False,
     )
 
-conn = get_connection()
-cursor = conn.cursor()
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-engine = create_engine(get_sqlalchemy_connection_string(), echo=True)
-
-SessionLocal = sessionmaker(bind=engine)
 
 from flask import Flask
 from Controler.receipt_processing import ReceiptController

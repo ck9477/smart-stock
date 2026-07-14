@@ -13,7 +13,11 @@ class Product(Base):
         ForeignKey('category.id', ondelete="CASCADE"),
         nullable=False
     )
-    code = Column(String(50), unique=True, nullable=True)  
-
+    code = Column(String(50), unique=True, nullable=True)  # barcode
 
     volume_ml = Column(Integer, nullable=True)
+
+    # OpenFoodFacts enrichment
+    source = Column(String(20), default='manual', nullable=False)
+    off_category = Column(String(100), nullable=True)
+    off_brand = Column(String(100), nullable=True)
