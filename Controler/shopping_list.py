@@ -3,15 +3,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 
 from models.shopping_list import ShoppingList
+from models.Products import Product
+from models.Range import Range
 from Service.shopping_service import generate_shopping_list
-
+from config import get_sqlalchemy_connection_string
 
 # -----------------------------
 # DB Engine
 # -----------------------------
-engine = create_engine(
-    'mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server'
-)
+engine = create_engine(get_sqlalchemy_connection_string())
 
 Session = sessionmaker(bind=engine)
 
@@ -63,14 +63,34 @@ def get_all_by_user(user_id):
         ).all()
 
         if not items:
-            return jsonify({"error": "not found"}), 404
+            return jsonify([]), 200
+
+        # Resolve product names in one query
+        product_ids = [i.product_id for i in items]
+        products_map = {}
+        if product_ids:
+            products = session.query(Product).filter(
+                Product.id.in_(product_ids)
+            ).all()
+            products_map = {p.id: p.name for p in products}
+
+        # Resolve range names
+        range_ids = [i.range_enum for i in items]
+        ranges_map = {}
+        if range_ids:
+            ranges = session.query(Range).filter(
+                Range.id.in_(range_ids)
+            ).all()
+            ranges_map = {r.id: r.range_name for r in ranges}
 
         return jsonify([
             {
                 "id": i.id,
                 "product_id": i.product_id,
+                "product_name": products_map.get(i.product_id),
                 "amount": i.amount,
-                "range_enum": i.range_enum
+                "range_enum": i.range_enum,
+                "range_name": ranges_map.get(i.range_enum),
             }
             for i in items
         ])

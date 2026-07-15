@@ -2,8 +2,9 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from models.category import Category
+from config import get_sqlalchemy_connection_string
 
-engine = create_engine('mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server')
+engine = create_engine(get_sqlalchemy_connection_string())
 Session = sessionmaker(bind=engine)
 
 category_bp = Blueprint('category', __name__, url_prefix='/category')

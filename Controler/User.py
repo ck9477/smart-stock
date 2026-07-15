@@ -1,14 +1,13 @@
 from flask import Blueprint, request, jsonify
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import generate_password_hash, check_password_hash
 from models.users import User
 from Middleware.auth import create_access_token, create_refresh_token, login_required, decode_token, require_permission, require_role, csrf_required
 from Middleware.sanitize import sanitize_dict
+from config import get_sqlalchemy_connection_string
 
-engine = create_engine(
-    'mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server'
-)
+engine = create_engine(get_sqlalchemy_connection_string())
 
 Session = sessionmaker(bind=engine)
 

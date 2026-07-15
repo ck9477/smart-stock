@@ -1,0 +1,76 @@
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: smart-stock-db
+    user: root
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${DB_PASSWORD:-SmartStock123!}
+      - MSSQL_PID=Express
+      - MSSQL_DATA_DIR=/var/opt/mssql/sqldata
+      - MSSQL_LOG_DIR=/var/opt/mssql/sqllog
+    ports:
+      - "${MSSQL_HOST_PORT:-1433}:1433"
+    volumes:
+      - sql_data:/var/opt/mssql/sqldata
+      - sql_log:/var/opt/mssql/sqllog
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD:-SmartStock123!}" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - smart-stock-net
+
+  db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: smart-stock-db-init
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: >
+      bash -c "
+        echo 'Running init script...';
+        /opt/mssql-tools18/bin/sqlcmd -S db -U sa -P '${DB_PASSWORD:-SmartStock123!}' -C -i /docker-entrypoint-initdb.d/init.sql;
+        echo 'Init script completed!';
+      "
+    volumes:
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - smart-stock-net
+
+  backend:
+    build: .
+    container_name: smart-stock-backend
+    ports:
+      - "${BACKEND_HOST_PORT:-5000}:5000"
+    environment:
+      - DB_SERVER=${DB_SERVER:-db}
+      - DB_PORT=${DB_PORT:-1433}
+      - DB_NAME=${DB_NAME:-SmartStock}
+      - DB_USERNAME=${DB_USERNAME:-sa}
+      - DB_PASSWORD=${DB_PASSWORD:-SmartStock123!}
+      - DB_TRUSTED_CONNECTION=${DB_TRUSTED_CONNECTION:-no}
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - FLASK_PORT=${FLASK_PORT:-5000}
+    depends_on:
+      db:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - debug_screenshots:/app/debug_screenshots
+    restart: unless-stopped
+    networks:
+      - smart-stock-net
+
+volumes:
+  sql_data:
+  sql_log:
+  debug_screenshots:
+
+networks:
+  smart-stock-net:
+    external: true

@@ -2,8 +2,9 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from models.Range import Range
+from config import get_sqlalchemy_connection_string
 
-engine = create_engine('mssql+pyodbc://@D403-005/SmartStock?driver=ODBC Driver 17 for SQL Server')
+engine = create_engine(get_sqlalchemy_connection_string())
 Session = sessionmaker(bind=engine)
 
 range_bp = Blueprint('range', __name__, url_prefix='/range')
