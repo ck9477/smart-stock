@@ -21,6 +21,74 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     return "\n".join(text_parts)
 
 
+def fix_hebrew_reversal(text: str) -> str:
+    """
+    Full fix for Hebrew text extracted from RTL PDFs where:
+    1. Each Hebrew word's characters are stored in visual (reversed) order
+    2. Final form letters are missing (regular mem/nun/etc. instead of sofit)
+    3. All tokens (Hebrew + numbers) are in LTR visual order
+
+    This function handles all three issues:
+      - Reverses each Hebrew word's characters
+      - Applies final forms (sofit) to word-final letters
+      - Reverses the order of ALL tokens (words + numbers) from visual→logical
+    """
+    if not text:
+        return text
+
+    # Regular Hebrew letters → their sofit (final) forms
+    FINAL_FORMS = {'כ': 'ך', 'מ': 'ם', 'נ': 'ן', 'פ': 'ף', 'צ': 'ץ'}
+    # Reverse mapping: sofit → regular (for chars that were final in original
+    # and end up at the start after reversal, e.g. שרף → reversed → ףרש → fix → שרף)
+    REGULAR_FORMS = {'ך': 'כ', 'ם': 'מ', 'ן': 'נ', 'ף': 'פ', 'ץ': 'צ'}
+    # All Hebrew characters (regular + sofit)
+    HEBREW_CHARS = set('אבגדהוזחטיכלמנסעפצקרשת' + 'םןץףך')
+
+    def is_hebrew_token(token: str) -> bool:
+        return any(c in HEBREW_CHARS for c in token)
+
+    def fix_hebrew_token(token: str) -> str:
+        """Reverse a Hebrew token (including embedded quotes/geresh) and apply final forms."""
+        fixed = token[::-1]
+
+        # Apply final form to the LAST character position
+        # (which corresponds to the word-final letter after RTL reversal)
+        if len(fixed) > 0:
+            last_char = fixed[-1]
+            if last_char in FINAL_FORMS:
+                # Regular letter at word-end → convert to sofit
+                fixed = fixed[:-1] + FINAL_FORMS[last_char]
+
+        # If the FIRST character after reversal is a sofit form,
+        # it means it was the last char in the original (visual) order
+        # and should be converted back to regular form (it's now at word-start)
+        if len(fixed) > 0:
+            first_char = fixed[0]
+            if first_char in REGULAR_FORMS:
+                fixed = REGULAR_FORMS[first_char] + fixed[1:]
+
+        return fixed
+
+    # Tokenize: split into tokens preserving spacing
+    # Match: Hebrew+geresh combos, pure Hebrew, numbers, English, or single non-space chars
+    tokens = re.findall(
+        r"[א-ת]+['׳״\"][א-ת]+"   # Hebrew-abbreviation (e.g. וא'ג, ל"מ, ג"ק)
+        r"|[א-ת]+"                # Pure Hebrew words
+        r"|\d+(?:\.\d+)?"         # Numbers
+        r"|[A-Za-z]+"             # English words
+        r"|\s+"                   # Whitespace (preserve)
+        r"|\S",                    # Any other non-space char
+        text
+    )
+
+    # Fix each Hebrew token
+    fixed_tokens = [fix_hebrew_token(t) if is_hebrew_token(t) else t for t in tokens]
+
+    # Reverse overall token order (visual → logical)
+    fixed_tokens.reverse()
+    return ''.join(fixed_tokens)
+
+
 # ═══════════════════════════════════════════════════════════════
 # 1. MEHADRIN ONLINE — dedicated parser
 # ═══════════════════════════════════════════════════════════════
@@ -155,7 +223,8 @@ def parse_mehadrin(text: str) -> list[dict]:
         if not raw_line or len(raw_line) < 2:
             continue
 
-        name = get_display(raw_line)
+        # Fix: character reversal, final forms, and visual→logical word order
+        # name = fix_hebrew_reversal(raw_line)
 
         # Filter out non-product names
         noise = ["תעודת", "משלוח", "חשבונית", "סהכ", 'סה"כ', "מע\"מ",
@@ -335,31 +404,61 @@ def parse_generic(text: str) -> list[dict]:
         seen_codes.add(code)
 
         # ── Extract quantity ──
-        # In RAW: total unit_price qty_received qty_sent ...
-        # Normal case: all 4 are decimal numbers (X.XX)
-        # Supplied=0 case: '----' '----' <qty_received_int> 0 ...
-        all_nums = re.findall(r'\b(\d+\.\d{2})\b', line)
+        # Shuk City raw format: total  unit_price  qty_received  qty_sent  unit_type  name  code
+        # (all four leading values are .XX decimal strings or '----')
+        #
+        # Problem: some receipts have integer-only quantities (not .XX formatted),
+        # which breaks the positional logic when we only match \d+\.\d{2}.
+        # So we tokenize the whole raw line into "value units" — either a decimal,
+        # a '----' dummy, or an integer.
+        #
+        # Strategy: find ALL value-like tokens at the start of the line (up to 4),
+        # and use the THIRD one (qty_received) as quantity.
+        # If the third token doesn't parse to a reasonable quantity, scan all tokens
+        # for the best candidate (integer > 0, ≤ 200 that isn't obviously a price).
+
+        # Tokenize the raw line into value units (decimal, '----', or standalone int)
+        value_tokens = re.findall(r'\b(?:\d+\.\d{2}|----|\d+)\b', line)
+
         quantity = 1
 
-        if len(all_nums) >= 3:
-            try:
-                qty_val = int(float(all_nums[2]))
-                if qty_val > 0:
-                    quantity = qty_val
-            except (ValueError, IndexError):
-                pass
-        else:
-            # '----' case: look for the plain integer between '---- ----' and '0'
-            # RAW: '---- ---- <qty_received> 0 ...'
-            # Remove '----' strings, then find the first integer
-            stripped = re.sub(r'----', ' ', line)
-            int_nums = re.findall(r'\b(\d+)\b', stripped)
-            for n_str in int_nums:
-                n = int(n_str)
-                # The qty_received is typically a small integer (1-50)
-                # Skip large numbers (codes) and 0
-                if 1 <= n <= 50:
-                    quantity = n
+        # Try the positional approach first: token[2] should be qty_received
+        if len(value_tokens) >= 3:
+            candidate = value_tokens[2]
+            if candidate != '----':
+                try:
+                    qty_float = float(candidate)
+                    if qty_float == int(qty_float) and 1 <= qty_float <= 200:
+                        # Integer quantity (e.g. "4")
+                        quantity = int(qty_float)
+                    elif qty_float < 1:
+                        # Fractional quantity (e.g. "0.69" kg for produce)
+                        quantity = round(qty_float, 2)
+                    elif 1 < qty_float <= 200:
+                        # Still reasonable as quantity
+                        quantity = int(qty_float)
+                except (ValueError, IndexError):
+                    pass
+
+        # If positional approach gave us 1 (default), try to find ANY reasonable quantity
+        # among the value tokens, avoiding obvious prices (numbers that look like .XX format
+        # with values typical for prices: 5-500 with .90/.99/.50 endings).
+        if quantity == 1:
+            for token in value_tokens:
+                if token == '----':
+                    continue
+                try:
+                    val = float(token)
+                except ValueError:
+                    continue
+                if val == int(val) and 1 <= val <= 200:
+                    # Integer found — but filter out codes (5+ digits)
+                    if len(token.replace('.', '')) <= 3:
+                        quantity = int(val)
+                        break
+                elif val < 1 and val > 0:
+                    # Fractional quantity (produce sold by weight)
+                    quantity = round(val, 2)
                     break
 
         # ── Extract name from RAW line ──
@@ -377,7 +476,7 @@ def parse_generic(text: str) -> list[dict]:
         if "הזמנה" in display or "דירה" in display or "רחוב" in display or "טלפון" in display:
             continue
 
-        # Remove unit type markers: "יח", "קג", "גק"
+        # Remove unit type markers — single-word abbreviations (raw RTL)
         raw_line = re.sub(r'\b(?:יח|קג|גק)\b', ' ', raw_line)
 
         # Clean up
@@ -394,8 +493,98 @@ def parse_generic(text: str) -> list[dict]:
         if any(w in name for w in skip_words):
             continue
 
-        # Remove standalone numeric fragments
+        # Remove standalone numeric fragments (price leftovers, single numbers)
         name = re.sub(r'(?<!\S)[\d.]{1,6}(?!\S)', ' ', name)
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        # ── Remove unit markers & weight/size suffixes from product name ──
+        # These are NOT part of the product name — they describe the package.
+        # Same comprehensive list as parse_mehadrin uses.
+        # Define unit marker patterns that work with BOTH:
+        # - Standard ASCII quotes (raw PDF text)
+        # - Hebrew punctuation quotes (after fix_hebrew_reversal converts them)
+        # We use character classes [\"״] and [\'׳] throughout.
+
+        unit_markers = [
+            # IMPORTANT: longer patterns MUST come before shorter ones!
+            # Otherwise e.g. r'\bג[\'׳]\.?\b' matches the 'ג part of 'ג'ל',
+            # leaving lone 'ל' behind.
+            #
+            # kg
+            r'\bק["״]ג\b', r'\bג["״]ק\b',
+            # liter / gallon (multi-char first)
+            r'\bליטר\b', r'\bרטיל\b',
+            r'\bליט[\'׳]?\.?\b', r'\b\'?\.?טיל\b',
+            r'\bגלון\b', r'\bןולג\b',
+            r'\bוא[\'׳]?ג\b', r'\bג[\'׳]?או\b',
+            # ml
+            r'\bמ["״]ל\b', r'\bל["״]מ\b',
+            r'\bמ["״\'׳]?ל\b', r'\bל["״\'׳]?מ\b',
+            # RTL reversed gallon + liter patterns (multi-char before single-char)
+            r'\bג["״]ל\b', r'\bל["״]ג\b',
+            r'\bג[\'׳]ל\b', r'\bל[\'׳]ג\b',
+            r'\bל[\'׳]ט\b', r'\bט[\'׳]ל\b',
+            # gram — full word and longer abbreviations FIRST
+            r'\bגרם\b', r'\bםרג\b',
+            r'\bגר[\'׳]?\.?\b', r'\b\'?\.?רג\b',
+            r'\bגר\b',
+            r'\bג[\'׳]\.?\b',                   # shortest gram abbrev — LAST
+            # unit — longer first
+            r'\bיחידה\b', r'\bהדיחי\b',
+            r'\bליחידה\b', r'\bהדיחיל\b',
+            r'\bיחידות\b', r'\bתודיחי\b',
+            r'\bיח[\'׳]\.?\b', r'\b\'?\.?חי\b',
+            # pack
+            r'\bמארז\b', r'\bזראמ\b',
+            # box / can
+            r'\bקופסה\b', r'\bהספוק\b',
+            r'\bקופסת\b', r'\bתספוק\b',
+            r'\bפחית\b', r'\bתיחפ\b',
+            r'\bפח\b', r'\bחפ\b',
+            # bottle
+            r'\bבקבוק\b', r'\bקוקבב\b',
+            # bag / sachet
+            r'\bשקית\b', r'\bתיקש\b',
+            # piece / bead
+            r'\bיחל["״]צ\b', r'\bצ["״]לחי\b',
+        ]
+        for pattern in unit_markers:
+            name = re.sub(pattern, '', name)
+
+        # Clean up extra spaces from unit removal
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        # Remove stray single-character unit remnants at end of name
+        # (e.g. 'ל' from 'מ\"ל', 'ג' from gram, 'א' etc.)
+        # Only if preceded by a digit — that confirms it's a unit leftover
+        name = re.sub(r'\s*\d+\s*[א-ת]\s*$', '', name)
+        # Also remove trailing lone characters that are unit leftovers
+        name = re.sub(r'\s*\d+\s*\'?\s*$', '', name)
+        # Remove leftover number at end (e.g. "1.19" that was part of unit)
+        name = re.sub(r'\s+\d+\.\d{2}\s*$', '', name)
+
+        # Remove noise words like "מחיר ל..." leftovers
+        name = re.sub(r'\bמחיר\b', '', name)
+        name = re.sub(r'\bריחמ\b', '', name)  # reversed
+
+        # Remove leading leftover numbers + english word (like "4 calm", "2 pack")
+        name = re.sub(r'^\d+\s+[a-zA-Z]+\s*', '', name)
+        # Remove leading english-only words BUT preserve product codes like TnX, XL
+        if not re.match(r'^[A-Za-z]{2,4}\s', name):
+            name = re.sub(r'^[a-zA-Z]+\s+', '', name)
+
+        # Remove trailing single-letter leftovers after cleanup
+        # (RTL reversed unit forms were already removed in unit_markers above)
+        name = re.sub(r'\s+[א-ת]\s*$', '', name)
+        # Remove stray quotes and partial numbers left from unit removal
+        name = re.sub(r'\s+\d+\s*\'+\s*', ' ', name)       # e.g. "240 '"
+        # Remove trailing number only if it's clearly a unit leftover
+        name = re.sub(r'(?<!\')\s+\d+\.?\s*$', '', name)
+        name = re.sub(r'\s+\d+\.\d+\s*$', '', name)        # float leftovers
+        name = re.sub(r'\s+\'+\s*$', '', name)
+        # Remove "מס' X" / "מס'" pattern — product numbering, not part of name
+        name = re.sub(r'\bמס\'\s*\d*\s*', '', name)
+
         name = re.sub(r'\s+', ' ', name).strip()
 
         if len(name) < 3:

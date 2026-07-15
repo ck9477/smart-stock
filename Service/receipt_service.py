@@ -356,6 +356,7 @@ class ReceiptService:
 
         hebrew_count = sum(1 for c in clean_name if '\u0590' <= c <= '\u05FF')
         if hebrew_count > 1:
-            clean_name = get_display(clean_name)
+            from Service.receipt_parser import fix_hebrew_reversal
+            clean_name = fix_hebrew_reversal(clean_name)
 
         return clean_name
