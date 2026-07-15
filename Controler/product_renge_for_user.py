@@ -49,13 +49,35 @@ def create_product_range():
         session.close()
 
 
-# GET ALL
-@product_range_bp.route('', methods=['GET'])
-def get_product_ranges():
+# # GET ALL
+# @product_range_bp.route('', methods=['GET'])
+# def get_product_ranges():
+#     session = Session()
+
+#     try:
+#         items = session.query(ProductRangeForTheUser).all()
+
+#         return jsonify([
+#             {
+#                 "id": i.id,
+#                 "user_id": i.user_id,
+#                 "Products_id": i.Products_id,
+#                 "Range_id": i.Range_id
+#             }
+#             for i in items
+#         ])
+
+#     finally:
+#         session.close()
+# GET BY USER
+@product_range_bp.route('/<int:user_id>', methods=['GET'])
+def get_product_ranges(user_id):
     session = Session()
 
     try:
-        items = session.query(ProductRangeForTheUser).all()
+        items = session.query(ProductRangeForTheUser).filter(
+            ProductRangeForTheUser.user_id == user_id
+        ).all()
 
         return jsonify([
             {
@@ -69,7 +91,6 @@ def get_product_ranges():
 
     finally:
         session.close()
-
 
 # GET BY ID
 @product_range_bp.route('/<int:id>', methods=['GET'])

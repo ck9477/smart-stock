@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from models.base import Base
 
+
 class Product(Base):
     __tablename__ = 'products'
 
@@ -10,14 +11,16 @@ class Product(Base):
 
     category_id = Column(
         Integer,
-        ForeignKey('category.id', ondelete="CASCADE"),
+        ForeignKey('category.id'),
         nullable=False
     )
-    code = Column(String(50), unique=True, nullable=True)  # barcode
+
+    code = Column(String(50), unique=True, nullable=True)
 
     volume_ml = Column(Integer, nullable=True)
 
-    # OpenFoodFacts enrichment
     source = Column(String(20), default='manual', nullable=False)
     off_category = Column(String(100), nullable=True)
     off_brand = Column(String(100), nullable=True)
+
+    category = relationship("Category")

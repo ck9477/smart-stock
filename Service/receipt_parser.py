@@ -2,7 +2,7 @@
 Receipt Parser — dedicated extraction functions per receipt type.
 
 1. parse_mehadrin  — Mehadrin Online receipts
-2. parse_generic  — all other receipt types (maximal effort)
+2. parse_generic  — all other receipt types
 """
 import io
 import re
@@ -23,241 +23,213 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# SHARED HELPERS
+# ═══════════════════════════════════════════════════════════════
+
+# Codes to never treat as products
+_KNOWN_BAD_CODES = {
+    '30000219419', '30000199410', '520022732', '9253567', '035702892',
+    '0548494994', '1800071300', '7536333', '9483838', '071300',
+    '00000', '0008', '3599', '20380', '40417', '47036', '73718',
+    '12532', '86250', '83260', '9219407',
+}
+_PROMO_PREFIXES = ('256', '257', '260', '253', '255')
+
+# Unit patterns to remove from names (bidirectional)
+_UNIT_PATTERNS = [
+    r'\bק"ג\b', r'\bג"ק\b', r'\bגק\b', r'\bקג\b', r'\bקילו\b',
+    r'\bליטר\b', r'\bרטיל\b', r'\bגלון\b', r'\bליט\'?\.?\b',
+    r'\bמ"ל\b', r'\bל"מ\b', r'\bגרם\b', r'\bגר\'?\.?\b',
+    r'\bיחידה\b', r'\bהדיחי\b', r'\bחי\b', r'\bיח\b', r'\bיח\'\.?\b',
+    r'\bליחידה\b', r'\bהדיחיל\b', r'\bיחידות\b', r'\bתודיחי\b',
+    r'\bמארז\b', r'\bחבילה\b', r'\bקופסה\b', r'\bקופסת\b',
+    r'\bפחית\b', r'\bבקבוק\b', r'\bשקית\b', r'\bקילוגרם\b',
+    r'\bגל\b', r'\bלג\b', r'\bםרג\b', r'\bג\'ל\b', r'\bל\'ג\b',
+    r'\bג"ל\b', r'\bל"ג\b', r'\bט\'ל\b', r'\bל\'ט\b',
+]
+
+
+def _find_code_in_line(line: str) -> str | None:
+    """Extract product code from a line: barcode > fruit code > internal code."""
+    # Barcode (12-14 digits)
+    m = re.search(r'\b(\d{12,14})\b', line)
+    if m:
+        return m.group(1)
+    # Fruit/veggie (9 + 6-8 digits)
+    m = re.search(r'\b(9\d{6,8})\b', line)
+    if m:
+        return m.group(1)
+    # Internal (5-10 digits, exclude promos and known-bad)
+    for m in re.finditer(r'\b(\d{5,10})\b', line):
+        c = m.group(1)
+        if c in _KNOWN_BAD_CODES:
+            continue
+        if c.startswith(_PROMO_PREFIXES):
+            continue
+        return c
+    return None
+
+
+def _clean_product_name(name: str) -> str:
+    """Remove units, numbers, and noise from product name."""
+    for pat in _UNIT_PATTERNS:
+        name = re.sub(pat, '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+
+    # Remove trailing numbers / unit fragments
+    name = re.sub(r'\s+\d+(?:\.\d+)?\s*[א-ת]*\s*$', '', name)
+    name = re.sub(r'\s+\d+%?\s*$', '', name)
+    name = re.sub(r'\s+[א-תA-Za-z]\s*$', '', name)
+    name = re.sub(r'^\s*[א-תA-Za-z]\s+', '', name)
+
+    # Remove special chars except Hebrew, English, digits, apostrophe, dash, plus, space
+    name = re.sub(r"[^֐-׿a-zA-Z0-9'\-+\s]", ' ', name)
+
+    # Remove noise words
+    for w in ['מחיר', 'ריחמ', 'מבצע', 'עצבמ']:
+        name = re.sub(r'\b' + w + r'\b', '', name)
+
+    name = name.replace('*', '').replace('"', '').replace('"', '')
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name
+
+
+def _extract_weight(display: str) -> int:
+    """Extract weight in grams from display text."""
+    patterns = [
+        (r'(\d+(?:\.\d+)?)\s*(?:ק"ג|קילוגרם|קילו|גק|ג"ק)', 1000),
+        (r'(\d+(?:\.\d+)?)\s*(?:גרם|גר\b|םרג|רג)', 1),
+        (r'(\d+(?:\.\d+)?)\s*(?:ליטר|ליט\'?|רטיל|ריטיל)', 1000),
+        (r'(\d+(?:\.\d+)?)\s*(?:מ"ל|מיליליטר|ל"מ)', 1),
+    ]
+    for pattern, multiplier in patterns:
+        m = re.search(pattern, display)
+        if m:
+            try:
+                return round(float(m.group(1)) * multiplier)
+            except ValueError:
+                pass
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════
 # 1. MEHADRIN ONLINE — dedicated parser
 # ═══════════════════════════════════════════════════════════════
 
 def is_mehadrin_receipt(text: str) -> bool:
     """Check if this is a Mehadrin Online receipt."""
-    return "mehadrinonline" in text.lower() or "service@monline.co.il" in text
+    if "mehadrinonline" in text.lower() or "service@monline.co.il" in text:
+        return True
+
+    # Detect by line structure:  X.XX  X.XX  N  N  <unit>  <name>  <code>
+    mehadrin_line = re.compile(
+        r'(?:\d+\.\d{2}|----)\s+(?:\d+\.\d{2}|----)\s+\d+\s+\d+\s+\S+\s+.{2,}?\s+\d{5,14}\s*$',
+        re.MULTILINE
+    )
+    return len(mehadrin_line.findall(text)) >= 3
 
 
 def parse_mehadrin(text: str) -> list[dict]:
     """
     Parse a Mehadrin Online receipt.
 
-    Mehadrin format — RAW line (reversed, RTL):
-        total_price unit_price quantity product_name barcode line_num
+    RAW format (space-separated, reversed RTL):
+        total_price  unit_price  qty_supplied  qty_sent  unit_type  ...product_name...  code
 
-    After bidi display:
-        line_num  barcode  product_name  quantity  unit_price  total_price
-
-    Examples (displayed):
-        1  7290112495037  קוקומן כדורי דגנים בטעם שוק  1.00  22.90  22.90
-        13 90000947       חציל ק"ג                       0.69   0.90   0.62
-
-    Returns list of dicts: {code, name, quantity}
+    '----' means unsupplied → qty=0.
     """
     items = []
-    seen_codes = set()
     lines = text.split("\n")
+
+    RE_DECIMAL = re.compile(r'^\d+\.\d{2}$')
+    RE_INT = re.compile(r'^\d+$')
+    RE_DASH = re.compile(r'^----$')
+    RE_NEG = re.compile(r'^-\d+\.\d{2}$')
+    RE_PROMO = re.compile(r':\s*מבצע|:\s*עצבמ')
+    RE_SEP = re.compile(r'^-{5,}$')
+
+    skip_display = {
+        "טלפון", "חשבונית", "תעודת", "ח.פ.", "סהכ", 'סה"כ',
+        "מע\"מ", "מ.ע.מ", "שולח", "נמען", "service@", ".co.il",
+        "mehadrin", "כתובת", "תאריך", "שעה", "עוסק", "קסוע",
+        "מורשה", "השרומ", "חולשמ", "הקפסה", "אספקה", "פקס",
+        "מיקוד", "דואר", "רחוב", "דירה", "עיר", "הזמנה",
+        "דמי", "משלוח", "מבצע", "הנחה", "אשראי", "מזומן",
+        "הנמזה", "הנומת", "רוזא", "תונח", "הרעה",
+        "ןופלט", "סקפ", "הריד", "בייחל", "המייקתה", "חיש",
+        "השיח", "םוכס", "לכה", "Page", "www.", "info@",
+    }
 
     for line in lines:
         line = line.strip()
-        if len(line) < 10:
+        if len(line) < 10 or RE_SEP.match(line) or RE_PROMO.search(line):
+            continue
+        if re.match(r'^\d{1,2}:\d{2}', line):
             continue
 
         display = get_display(line)
-
-        # Skip header/footer lines
-        skip_words = ["טלפון", "חשבונית", "תעודת", "ח.פ.", "סהכ", 'סה"כ',
-                      "מע\"מ", "מ.ע.מ", "שולח", "נמען", "service@", ".co.il",
-                      "mehadrin", "כתובת", "תאריך", "שעה"]
-        if any(w in display for w in skip_words):
+        if any(w in display for w in skip_display):
             continue
 
-        # Find product code: barcode (12-14 digits) or Mehadrin fruit code (9xxxxxxx)
-        code_match = re.search(r'\b(\d{12,14})\b', line)
-        fruit_match = re.search(r'\b(9\d{6,7})\b', line)
+        tokens = line.split()
+        if len(tokens) < 5:
+            continue
 
+        # Skip negative-price lines (discounts)
+        if RE_NEG.match(tokens[0]):
+            continue
+
+        # ── Find code (last valid numeric token) ──
         code = None
-        if code_match:
-            code = code_match.group(1)
-        elif fruit_match:
-            code = fruit_match.group(1)
-        else:
-            continue
-
-        if code in seen_codes:
-            continue
-        seen_codes.add(code)
-
-        # ── Extract the 3 decimal numbers (in RAW order: total, unit_price, qty) ──
-        # RAW: 22.90 22.90 1.00 <name> <code> <num>
-        # The THREE decimal numbers at the start (in raw) are: total, unit_price, quantity
-        all_nums = re.findall(r'\b(\d+\.\d{2})\b', line)
-        quantity = 1
-        if len(all_nums) >= 3:
-            try:
-                qty_float = float(all_nums[2])
-                if qty_float < 1:
-                    quantity = round(qty_float, 2)
-                else:
-                    quantity = int(qty_float)
-            except (ValueError, IndexError):
-                quantity = 1
-        elif len(all_nums) >= 1:
-            for n_str in all_nums:
-                try:
-                    n = int(float(n_str))
-                    if 1 <= n <= 200:
-                        quantity = n
-                        break
-                except ValueError:
-                    pass
-
-        # ── Extract weight in GRAMS ──
-        # Converts everything to grams:
-        #   kg (*1000), gram (as-is), liter (*1000), ml (as-is)
-        #   If no unit but quantity < 1 (fruits/veggies sold by kg) → qty*1000
-        weight = 0
-        weight_patterns = [
-            (r'(\d+(?:\.\d+)?)\s*(?:ק"ג|קילוגרם|קילו)', 1000),
-            (r'(\d+(?:\.\d+)?)\s*(?:גרם|גר\b)', 1),
-            (r'(\d+(?:\.\d+)?)\s*(?:ליטר|ליט\'?|רטיל)', 1000),
-            (r'(\d+(?:\.\d+)?)\s*(?:מ"ל|מיליליטר)', 1),
-        ]
-        for pattern, multiplier in weight_patterns:
-            m = re.search(pattern, display)
-            if m:
-                try:
-                    weight = round(float(m.group(1)) * multiplier)
-                except ValueError:
-                    pass
+        for i in range(len(tokens) - 1, -1, -1):
+            c = _find_code_in_line(tokens[i])
+            if c and len(c) >= 5:
+                code = c
                 break
-
-        # Fruits/veggies (9xxxxxxx) sold by kg — convert quantity to grams
-        if weight == 0 and code.startswith('9') and len(code) == 8 and isinstance(quantity, float):
-            weight = round(quantity * 1000)
-        # If quantity looks like kg (< 1) but no weight unit found
-        elif weight == 0 and isinstance(quantity, float) and quantity < 1:
-            weight = round(quantity * 1000)
-
-        # ── Extract product name ──
-        # The name is between the code and the 3 decimal numbers
-        # In RAW: ... quantity <name> code num
-        # In DISPLAY: num code <name> quantity ...
-
-        # Work on RAW line (no bidi) — strip the three decimal numbers from the beginning
-        raw_line = line
-
-        # Remove the 3 leading decimal numbers (total, unit_price, quantity)
-        for _ in range(3):
-            raw_line = re.sub(r'^\s*\d+\.\d{2}\s*', '', raw_line, count=1)
-
-        # Now raw_line should be: <product_name_in_reverse> <code> <line_num>
-        # Remove the trailing code and line number
-        raw_line = re.sub(r'\s+' + re.escape(code) + r'\s+\d{1,2}\s*$', '', raw_line)
-        # Also try removing just the code
-        raw_line = re.sub(r'\s+' + re.escape(code) + r'\s*$', '', raw_line)
-
-        # Clean up
-        raw_line = raw_line.strip()
-
-        if not raw_line or len(raw_line) < 2:
+        if not code:
             continue
 
-        name = get_display(raw_line)
+        # ── Quantity ──
+        quantity = 1
+        dash_count = sum(1 for t in tokens[:4] if RE_DASH.match(t))
+        if dash_count >= 2:
+            quantity = 0
+        elif len(tokens) >= 3:
+            t0, t1, t2 = tokens[0], tokens[1], tokens[2]
+            if RE_DECIMAL.match(t0) and RE_DECIMAL.match(t1):
+                # t2 is either decimal qty or integer qty
+                if RE_DECIMAL.match(t2):
+                    qty_f = float(t2)
+                    quantity = int(qty_f) if qty_f == int(qty_f) else round(qty_f, 2)
+                elif RE_INT.match(t2) and not t2.startswith(('256', '257', '260')):
+                    quantity = int(t2)
 
-        # Filter out non-product names
-        noise = ["תעודת", "משלוח", "חשבונית", "סהכ", 'סה"כ', "מע\"מ",
-                 "מעמ", "טלפון", "פקס", "כתובת", "invoice", "receipt",
-                 "אספקה", "הספקה", "דמי", "משלוח"]
-        if any(n in name for n in noise) or len(name) < 3:
+        # ── Name ──
+        # After first 4 tokens (price fields), before the code
+        name_start = 4
+        # Find code index
+        code_idx = next((i for i, t in enumerate(tokens) if t == code), len(tokens) - 1)
+        name_tokens = []
+        for i in range(name_start, code_idx):
+            t = tokens[i]
+            if t in ('יח', 'קג', 'חי', 'גק'):
+                continue
+            if re.match(r'^\d{1,4}$', t) or re.match(r'^\d{1,3}%$', t):
+                continue
+            if len(t) <= 1:
+                continue
+            name_tokens.append(t)
+
+        raw_name = ' '.join(name_tokens)
+        if not raw_name:
             continue
 
-        # ── Remove unit markers from product name ──
-        # Mehadrin appends unit info like "ק\"ג", "גרם", "ליטר", "מ\"ל", "יחידה" etc.
-        # These are NOT part of the product name and should be stripped.
-        unit_markers = [
-            # kg
-            r'\bק"ג\b', r'\bג"ק\b',
-            # liter / gallon
-            r'\bליטר\b', r'\bרטיל\b',
-            r'\bליט\'?\.?\b', r'\b\'?\.?טיל\b',
-            r'\bגלון\b', r'\bןולג\b',
-            r'\bוא\'?ג\b', r'\bג\'?או\b',   # gallon abbreviation
-            # ml
-            r'\bמ"ל\b', r'\bל"מ\b',
-            # gram (full + abbreviations)
-            r'\bגרם\b', r'\bםרג\b',
-            r'\bגר\'?\.?\b', r'\b\'?\.?רג\b',
-            r'\bג\'\.?\b',                     # just 'ג' for gram
-            # unit
-            r'\bיחידה\b', r'\bהדיחי\b',
-            r'\bיח\'\.?\b', r'\b\'?\.?חי\b',
-            r'\bליחידה\b', r'\bהדיחיל\b',     # "per unit"
-            r'\bיחידות\b', r'\bתודיחי\b',     # units (plural)
-            # pack
-            r'\bמארז\b', r'\bזראמ\b',
-            # box / can
-            r'\bקופסה\b', r'\bהספוק\b',
-            r'\bקופסת\b', r'\bתספוק\b',
-            r'\bפחית\b', r'\bתיחפ\b',        # can/tin
-            r'\bפח\b', r'\bחפ\b',             # tin abbreviation
-            # bottle
-            r'\bבקבוק\b', r'\bקוקבב\b',
-            # bag / sachet
-            r'\bשקית\b', r'\bתיקש\b',
-            # piece / bead
-            r'\bיחל״צ\b', r'\bצ״לחי\b',      # piece abbreviation
-        ]
-        for pattern in unit_markers:
-            name = re.sub(pattern, '', name)
-
-        # Clean up extra spaces from unit removal
-        name = re.sub(r'\s+', ' ', name).strip()
-
-        # Remove stray single-character unit remnants at end of name
-        # (e.g. 'ל' from 'מ\"ל', 'ג' from gram, 'א' etc.)
-        # Only if preceded by a digit — that confirms it's a unit leftover
-        name = re.sub(r'\s*\d+\s*[א-ת]\s*$', '', name)
-        # Also remove trailing lone characters that are unit leftovers
-        name = re.sub(r'\s*\d+\s*\'?\s*$', '', name)
-        # Remove leftover number at end (e.g. "1.19" that was part of unit)
-        name = re.sub(r'\s+\d+\.\d{2}\s*$', '', name)
-
-        # Remove noise words like "מחיר ל..." leftovers
-        name = re.sub(r'\bמחיר\b', '', name)
-        name = re.sub(r'\bריחמ\b', '', name)  # reversed
-
-        # Remove leading leftover numbers + english word (like "4 calm", "2 pack")
-        name = re.sub(r'^\d+\s+[a-zA-Z]+\s*', '', name)
-        # Remove leading english-only words BUT preserve product codes like TnX, XL
-        # English words that are product brands (<=4 chars, all caps or mixed case)
-        if not re.match(r'^[A-Za-z]{2,4}\s', name):
-            name = re.sub(r'^[a-zA-Z]+\s+', '', name)
-        else:
-            # It's a brand name — keep it, just clean surrounding mess
-            pass
-
-        # Remove leftover unit abbreviations in RTL
-        name = re.sub(r'\bל"ג\b', '', name)    # ml reversed
-        name = re.sub(r'\bג"ל\b', '', name)
-        # Remove "ל'ג" / "ג'ל" (jerry can unit), "ל'ט" / "ט'ל" (liter alt)
-        name = re.sub(r'\bל\'ג\b', '', name)
-        name = re.sub(r'\bג\'ל\b', '', name)
-        name = re.sub(r'\bל\'ט\b', '', name)
-        name = re.sub(r'\bט\'ל\b', '', name)
-
-        # Remove trailing single-letter leftovers after cleanup
-        # BUT preserve patterns like "מס' 8" (product number) — only strip
-        # single letter if it's not part of "מס' X"
-        name = re.sub(r'\s+[א-ת]\s*$', '', name)
-        # Remove stray quotes and partial numbers left from unit removal
-        name = re.sub(r'\s+\d+\s*\'+\s*', ' ', name)       # e.g. "240 '"
-        # Remove trailing number only if it's clearly a unit leftover
-        # But preserve "מס' 8" pattern (product numbering)
-        name = re.sub(r'(?<!\')\s+\d+\.?\s*$', '', name)
-        name = re.sub(r'\s+\d+\.\d+\s*$', '', name)        # float leftovers
-        name = re.sub(r'\s+\'+\s*$', '', name)
-        # Restore missing numbers after "מס'" if they were removed
-        name = re.sub(r'\b(מס\')\s*$', r'\1', name)
-
-        name = re.sub(r'\s+', ' ', name).strip()
-
-        # Re-check length after unit removal
-        if len(name) < 3:
+        name = get_display(raw_name)
+        name = _clean_product_name(name)
+        if len(name) < 2:
             continue
+
+        weight = _extract_weight(display)
 
         items.append({
             "code": code,
@@ -270,36 +242,34 @@ def parse_mehadrin(text: str) -> list[dict]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2. MAXIMAL PARSER — for all other receipt types
+# 2. GENERIC PARSER — for all other receipt types (Yohananof, Shuk City, etc.)
 # ═══════════════════════════════════════════════════════════════
 
 def parse_generic(text: str) -> list[dict]:
     """
-    Maximal-effort parser for any receipt that isn't Mehadrin.
+    Maximal-effort parser for any non-Mehdarin receipt.
 
-    Shuk City format — RAW line (reversed RTL):
-        total  unit_price  qty_received  qty_sent  unit_type  product_name  code
-
-    After bidi display:
-        code  product_name  unit_type  qty_sent  qty_received  unit_price  total
-
-    Special case: items not yet supplied have '----' instead of total & unit_price.
-    Those still have qty_received as a plain integer.
-
-    Returns list of dicts: {code, name, quantity}
+    Approach:
+      1. Find product code (barcode/fruit/internal) per line
+      2. Find quantity (integer close to the name)
+      3. Extract name between leading numeric/price fields and the code
+      4. Deduplicate: same code → merge quantities
     """
-    items = []
-    seen_codes = set()
+    items: list[dict] = []
+    seen: dict[str, int] = {}  # code -> index in items list
     lines = text.split("\n")
 
-    skip_words = [
+    skip_display = {
         "חשבונית", "תעודת", "חולשמ", "השרומ", "עוסק", "invoice",
         "טלפון", "פקס", "כתובת", "סהכ", 'סה"כ', "סה״כ",
         "מע\"מ", "מעמ", "משלוח", "תאריך", "שעה", "מזומן",
         "אשראי", "קבלה", "תשלום", "מיקוד", "עיר",
-        "מבצע", "הנחה", "אספקה", "הספקה", "רחוב", "דרך",
-        "email", "co.il", "ישח",
-    ]
+        "הנחה", "אספקה", "הקפסה", "רחוב", "דרך", "הזמנה",
+        "email", "co.il", "ישח", "קסוע", "רוזא", "תונח",
+        "הנמזה", "הנומת", "הרעה", "הריד", "בייחל",
+        "המייקתה", "חיש", "השיח", "www.", "Page", "info@",
+    }
+    skip_rev = {"םוכס", "לכה", 'ל"ה'}
 
     for line in lines:
         line = line.strip()
@@ -308,133 +278,191 @@ def parse_generic(text: str) -> list[dict]:
 
         display = get_display(line)
 
-        # Skip non-product / promo lines
-        if any(w in display for w in skip_words):
+        # Skip non-product lines
+        if any(w in display for w in skip_display):
+            continue
+        if any(w in line for w in skip_rev):
+            continue
+        if re.match(r'^[-=]+$', line) or re.match(r'^\d{1,2}:\d{2}', line):
+            continue
+        if "מבצע" in display or "עצבמ" in line:
+            continue
+        if not re.search(r'[א-ת]', display) and not re.search(r'[א-ת]', line):
+            continue
+        # Skip negative-price lines
+        if re.match(r'^-\d+', line.strip()):
             continue
 
-        # Skip promo lines (מבצע)
-        if "מבצע" in display:
+        # ── Find code ──
+        code = _find_code_in_line(line)
+        if not code:
             continue
 
-        # Skip separator lines
-        if re.match(r'^[-=]+$', line):
-            continue
+        # ── Quantity ──
+        quantity = _find_generic_quantity(line, code)
 
-        # Find product code — barcode (12-14 digits) or internal code (5-8 digits)
-        barcode_match = re.search(r'\b(\d{12,14})\b', line)
-        internal_match = re.search(r'\b(\d{5,8})\b', line) if not barcode_match else None
-
-        if barcode_match:
-            code = barcode_match.group(1)
-        elif internal_match:
-            code = internal_match.group(1)
-        else:
-            continue
-
-        if code in seen_codes:
-            continue
-        seen_codes.add(code)
-
-        # ── Extract quantity ──
-        # In RAW: total unit_price qty_received qty_sent ...
-        # Normal case: all 4 are decimal numbers (X.XX)
-        # Supplied=0 case: '----' '----' <qty_received_int> 0 ...
-        all_nums = re.findall(r'\b(\d+\.\d{2})\b', line)
-        quantity = 1
-
-        if len(all_nums) >= 3:
-            try:
-                qty_val = int(float(all_nums[2]))
-                if qty_val > 0:
-                    quantity = qty_val
-            except (ValueError, IndexError):
-                pass
-        else:
-            # '----' case: look for the plain integer between '---- ----' and '0'
-            # RAW: '---- ---- <qty_received> 0 ...'
-            # Remove '----' strings, then find the first integer
-            stripped = re.sub(r'----', ' ', line)
-            int_nums = re.findall(r'\b(\d+)\b', stripped)
-            for n_str in int_nums:
-                n = int(n_str)
-                # The qty_received is typically a small integer (1-50)
-                # Skip large numbers (codes) and 0
-                if 1 <= n <= 50:
-                    quantity = n
-                    break
-
-        # ── Extract name from RAW line ──
-        raw_line = line
-
-        # Remove the 4 leading values (total, unit_price, qty_received, qty_sent)
-        # They can be "X.XX" or "----"
-        for _ in range(4):
-            raw_line = re.sub(r'^\s*(?:\d+\.\d{2}|----|0)\s*', '', raw_line, count=1)
-
-        # Remove the code from the end
-        raw_line = re.sub(r'\s+' + re.escape(code) + r'\s*$', '', raw_line)
-
-        # Skip clearly non-product lines (addresses, order numbers)
-        if "הזמנה" in display or "דירה" in display or "רחוב" in display or "טלפון" in display:
-            continue
-
-        # Remove unit type markers: "יח", "קג", "גק"
-        raw_line = re.sub(r'\b(?:יח|קג|גק)\b', ' ', raw_line)
-
-        # Clean up
-        raw_line = re.sub(r'\s+', ' ', raw_line).strip()
-
-        # Remove single/double letter noise
-        raw_line = re.sub(r'(?<!\S)[a-zA-Z]{1,2}(?!\S)', ' ', raw_line)
-        raw_line = re.sub(r'\s+', ' ', raw_line).strip()
-
-        name = get_display(raw_line) if raw_line else ""
-
+        # ── Name ──
+        name = _extract_generic_name(line, display, code)
         if not name or len(name) < 2:
             continue
-        if any(w in name for w in skip_words):
+
+        name = _clean_product_name(name)
+        if len(name) < 2:
             continue
 
-        # Remove standalone numeric fragments
-        name = re.sub(r'(?<!\S)[\d.]{1,6}(?!\S)', ' ', name)
-        name = re.sub(r'\s+', ' ', name).strip()
-
-        if len(name) < 3:
-            continue
-
-        items.append({
-            "code": code,
-            "name": name,
-            "quantity": quantity,
-            "weight": 0,
-        })
+        # ── Deduplicate by code (merge quantities) ──
+        if code in seen:
+            items[seen[code]]["quantity"] += quantity
+        else:
+            seen[code] = len(items)
+            items.append({
+                "code": code,
+                "name": name,
+                "quantity": quantity,
+                "weight": 0,
+            })
 
     return items
 
 
+def _find_generic_quantity(line: str, code: str) -> int | float:
+    """Find quantity in a non-Mehdarin product line."""
+    stripped = re.sub(r'\b' + re.escape(code) + r'\b', ' ', line)
+    stripped = re.sub(r'ILS', ' ', stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r'\d+\.\d{1,2}ILS', ' ', stripped, flags=re.IGNORECASE)
+
+    # ── הורדת מספרים ששייכים למשקל/אחוז/נפח ──
+    stripped = re.sub(r'\b\d{1,4}\s*Z\b', ' ', stripped)
+    stripped = re.sub(r'\b\d{1,3}\s*%', ' ', stripped)
+    stripped = re.sub(r'\b\d{2,4}\s*ML\b', ' ', stripped)
+    stripped = re.sub(r'\b\d+(?:\.\d+)?\s*L\b', ' ', stripped)
+    stripped = re.sub(r'\b\d+(?:\.\d+)?\s*(?:ק\"ג|גרם|ליטר|מ\"ל)\b', ' ', stripped)
+
+    all_nums = re.findall(r'(\d+(?:\.\d+)?)', stripped)
+    parsed = []
+    for n_str in all_nums:
+        try:
+            n = float(n_str)
+            if n > 0:
+                parsed.append(n)
+        except ValueError:
+            continue
+
+    if not parsed:
+        return 1
+
+    # מחירי מכולה (עם נקודה עשרונית) — נוציא אותם מהרשימה
+    non_prices = [n for n in parsed if not (0 < n < 1000 and n != int(n) and n == round(n, 2))]
+
+    # קודים פנימיים — מספרים שמופיעים מיד לפני הברקוד (דפוס "NNN 7290...")
+    code_pos = line.find(code)
+    internal_code_set = set()
+    if code_pos > 0:
+        prefix = line[:code_pos].strip()
+        for m in re.finditer(r'\b(\d{2,6})\b', prefix):
+            internal_code_set.add(int(m.group(1)))
+
+    # נעדיף מספרים שלמים קטנים (1-12) שאינם קוד פנימי
+    candidates = [n for n in non_prices if 1 <= n <= 12 and n == int(n) and int(n) not in internal_code_set]
+    if candidates:
+        return int(candidates[-1])
+
+    # קטנים מ-30, לא קוד פנימי
+    candidates = [n for n in non_prices if 1 <= n <= 30 and n == int(n) and int(n) not in internal_code_set]
+    if candidates:
+        return int(candidates[-1])
+
+    # Fallback: any reasonable number (לא קוד פנימי)
+    candidates = [n for n in non_prices if 0.1 <= n <= 80 and int(n) not in internal_code_set]
+    if candidates:
+        n = candidates[-1]
+        return int(n) if n == int(n) else n
+
+    return 1
+
+
+def _extract_generic_name(line: str, display: str, code: str) -> str:
+    """Extract product name from generic receipt line.
+
+    The name is on the OPPOSITE side of the barcode in the line.
+    If barcode is at the end (LTR), name is at the beginning → use display.
+    If barcode is at the beginning, name is after it → use line.
+    """
+    # ── שלב 1: חיתוך — לוקחים את מה שבצד הנגדי של הקוד ──
+    idx = line.rfind(code)
+    if idx < 0:
+        # בדיקה גם ב-display (RTL — הקוד מופיע בהתחלה)
+        idx = display.rfind(code)
+        if idx < 0:
+            return ""
+        raw = display[idx + len(code):]
+    elif idx > len(line) * 0.4:
+        # הקוד בחצי הימני (סוף ב־LTR, התחלה ב־RTL)
+        # → השם בתחילת השורה (לפני הקוד)
+        raw = line[:idx]
+    else:
+        # הקוד בחצי השמאלי (התחלה ב־LTR)
+        # → השם אחרי הקוד
+        raw = line[idx + len(code):]
+
+    # ── שלב 2: הסרת "80Z", "60%", "750ML", "1.5L" ליד השם ──
+    raw = re.sub(r'\b\d{1,4}\s*Z\b', ' ', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'\b\d{1,3}\s*%', ' ', raw)
+    raw = re.sub(r'\b\d{2,4}\s*ML\b', ' ', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'\b\d+(?:\.\d+)?\s*L\b', ' ', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'\b\d+(?:\.\d+)?\s*ק"ג\b', ' ', raw)
+    raw = re.sub(r'\b\d+(?:\.\d+)?\s*גרם\b', ' ', raw)
+    raw = re.sub(r'\b\d+(?:\.\d+)?\s*ליטר\b', ' ', raw)
+
+    # ── שלב 3: הסרת מחירים (X.XX או X.X) ──
+    raw = re.sub(r'\b\d+\.\d{1,2}\b', ' ', raw)
+
+    # ── שלב 4: הסרת ILS ──
+    raw = re.sub(r'\bILS\b', ' ', raw, flags=re.IGNORECASE)
+
+    # ── שלב 5: הסרת ברקודים/קודים (12-14 ספרות) ──
+    raw = re.sub(r'\b\d{12,14}\b', ' ', raw)
+
+    # ── שלב 6: הסרת מספרים שלמים בתחילת המחרוזת ──
+    for _ in range(6):
+        raw = re.sub(r'^\s*\d+\s+', ' ', raw)
+
+    # ── שלב 7: הסרת מילות יחידה/משקל בתחילת השם ──
+    raw = re.sub(
+        r'^\s*(?:מארז|חבילה|קופסה|קופסת|פחית|בקבוק|שקית|שלישיית|רביעיית|שמינייה|זוג)\s+',
+        ' ', raw
+    )
+
+    # ── שלב 8: הסרת תו בודד (אנגלית או עברית) בתחילת המחרוזת ──
+    raw = re.sub(r'^\s*[A-Za-z]\s+', ' ', raw)
+    raw = re.sub(r'^\s*[א-ת]\s+', ' ', raw)
+
+    # ── שלב 9: הסרת סימנים מיוחדים בתחילת המחרוזת ──
+    raw = re.sub(r'^\s*[%*\-+.,;:!?"\')\]}>]+\s*', ' ', raw)
+
+    # ── שלב 10: ניקוי רווחים כפולים ──
+    raw = re.sub(r'\s+', ' ', raw).strip()
+
+    # ── המרה ל-display (לוקח תוים עבריים) ──
+    heb = re.findall(r'[֐-׿]+', raw)
+    if heb:
+        result = ' '.join(heb)
+    else:
+        result = get_display(raw)
+
+    return result.strip() if result else ""
+
+
 # ═══════════════════════════════════════════════════════════════
-# 3. ROUTER — dispatches to the correct parser
+# 3. DATE EXTRACTION & ROUTER
 # ═══════════════════════════════════════════════════════════════
 
 def _extract_date(text: str) -> str | None:
-    """
-    Try to find a purchase date hidden in the receipt text.
-    Returns ISO date string (YYYY-MM-DD) or None.
-    """
-    # Typical patterns in RTL receipts after bidi display:
-    #   17:00 5/01/21    (Shuk City: hour + DD/MM/YY)
-    #   23:22 4/01/21    (Mehadrin:   hour + DD/MM/YY)
-    #   2024-01-15       (already ISO)
-    #
-    # We look for dates with separators '/' or '-'
-    # Pattern:  DD/MM/YY  or  DD/MM/YYYY  or  YYYY-MM-DD
-
-    # 1) DD/MM/YY or DD/MM/YYYY
-    matches = re.findall(r'\b(\d{1,2})[/](\d{1,2})[/](\d{2,4})\b', text)
-    for d, m, y in matches:
+    """Find purchase date in receipt text. Returns ISO string or None."""
+    # DD/MM/YY or DD/MM/YYYY
+    for d, m, y in re.findall(r'\b(\d{1,2})[/](\d{1,2})[/](\d{2,4})\b', text):
         try:
-            day, month = int(d), int(m)
-            year = int(y)
+            day, month, year = int(d), int(m), int(y)
             if year < 100:
                 year += 2000
             if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
@@ -442,9 +470,8 @@ def _extract_date(text: str) -> str | None:
         except ValueError:
             continue
 
-    # 2) YYYY-MM-DD (already ISO, fallback)
-    iso = re.findall(r'\b(\d{4})-(\d{2})-(\d{2})\b', text)
-    for y, m, d in iso:
+    # YYYY-MM-DD
+    for y, m, d in re.findall(r'\b(\d{4})-(\d{2})-(\d{2})\b', text):
         try:
             year, month, day = int(y), int(m), int(d)
             if 2020 <= year <= 2030 and 1 <= month <= 12 and 1 <= day <= 31:
@@ -457,14 +484,12 @@ def _extract_date(text: str) -> str | None:
 
 def parse_receipt(text: str) -> tuple[list[dict], str | None]:
     """
-    Parse any receipt. Automatically detects type and uses the best parser.
-
-    Returns (list of dicts: {code, name, quantity}, date: ISO str | None)
+    Parse any receipt. Auto-detects type and delegates.
+    Returns (items, date).
     """
     if is_mehadrin_receipt(text):
         items = parse_mehadrin(text)
     else:
         items = parse_generic(text)
 
-    receipt_date = _extract_date(text)
-    return items, receipt_date
+    return items, _extract_date(text)

@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from models.shopping_list import ShoppingList
 from models.Products import Product
 from models.Range import Range
+from models.category import Category
 from Service.shopping_service import generate_shopping_list
 
 # -----------------------------
@@ -70,6 +71,9 @@ def get_all_by_user(user_id):
             product = session.query(Product).filter(Product.id == i.product_id).first()
             range_obj = session.query(Range).filter(Range.id == i.range_enum).first()
 
+            category_id = product.category_id if product else None
+            category_obj = session.query(Category).filter(Category.id == category_id).first() if category_id else None
+
             result.append({
                 "id": i.id,
                 "product_id": i.product_id,
@@ -77,6 +81,8 @@ def get_all_by_user(user_id):
                 "amount": i.amount,
                 "range_enum": i.range_enum,
                 "range_name": range_obj.range_name if range_obj else "לא ידוע",
+                "category_id": category_id,
+                "category_name": category_obj.name if category_obj else "כללי",
             })
 
         return jsonify(result)

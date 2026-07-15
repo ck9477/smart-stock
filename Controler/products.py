@@ -23,7 +23,8 @@ def create():
     obj = Product(
         name=data["name"],
         category_id=data["category_id"],
-        volume_ml=data.get("volume_ml")
+        volume_ml=data.get("volume_ml"),
+        code=data.get("barcode")
     )
 
     session.add(obj)
@@ -33,6 +34,7 @@ def create():
     response = {
         "id": obj.id,
         "name": obj.name,
+        "barcode": obj.code,
         "category_id": obj.category_id,
         "volume_ml": obj.volume_ml
     }
@@ -52,14 +54,15 @@ def get_all():
     items = session.query(Product).all()
 
     response = [
-        {
-            "id": i.id,
-            "name": i.name,
-            "category_id": i.category_id,
-            "volume_ml": i.volume_ml
-        }
-        for i in items
-    ]
+    {
+        "id": i.id,
+        "name": i.name,
+        "barcode": i.code,
+        "category": i.category.name if i.category else None,
+        "volume_ml": i.volume_ml
+    }
+    for i in items
+]
 
     session.close()
 
@@ -82,6 +85,7 @@ def get_by_id(id):
     response = {
         "id": obj.id,
         "name": obj.name,
+        "barcode": obj.code,
         "category_id": obj.category_id,
         "volume_ml": obj.volume_ml
     }
@@ -109,12 +113,14 @@ def update(id):
     obj.name = data.get("name", obj.name)
     obj.category_id = data.get("category_id", obj.category_id)
     obj.volume_ml = data.get("volume_ml", obj.volume_ml)
+    obj.code = data.get("barcode", obj.code)
 
     session.commit()
 
     response = {
         "id": obj.id,
         "name": obj.name,
+        "barcode": obj.code,
         "category_id": obj.category_id,
         "volume_ml": obj.volume_ml
     }

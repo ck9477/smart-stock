@@ -71,6 +71,84 @@ class OpenFoodFactsAdapter:
 
     # ── Save to DB ──────────────────────────────────────────
 
+    # מיפוי OpenFoodFacts categories_tags → category_id פנימי
+    # ⚠️ הסדר קריטי — ההתאמה הראשונה מנצחת.
+    # דפוסים ספציפיים לפני כלליים (frozen vegetables לפני vegetables וכו')
+    OFF_CATEGORY_MAP = [
+        # ── קפואים (לפני vegetables/fruits/meat) ──
+        (["frozen", "ice cream", "frozen food", "frozen meals",
+          "frozen pizza", "frozen desserts"], 39),
+        # ── חטיפים וממתקים ──
+        (["biscuits", "cookies", "chocolates", "sweets", "candies",
+          "confectioneries", "snacks", "crisps", "chips", "popcorn",
+          "cereal bars", "sweet spreads", "nutella", "chocolate",
+          "wafer", "waffles"], 37),
+        # ── מאפים (לפני bread) ──
+        (["cakes", "pastries", "croissant", "brioche", "doughnuts", "rusks"], 27),
+        # ── לחמים ──
+        (["bread", "breads", "toast", "pita", "baguettes", "rolls"], 31),
+        # ── פסטות ואורז ──
+        (["pasta", "noodles", "rice", "couscous", "spaghetti", "macaroni",
+          "bulgur", "semolina", "quinoa"], 35),
+        # ── משקאות ──
+        (["beverages", "sodas", "cola", "soft drinks", "water", "mineral water",
+          "juice", "nectar", "iced tea", "energy drink", "syrup", "cordial",
+          "coffee", "tea", "hot drinks", "cocoa", "chocolate powder"], 32),
+        # ── שימורים ורטבים (לפני vegetables/fruits) ──
+        (["canned", "tuna", "sardine", "sauces", "ketchup", "mayonnaise",
+          "mustard", "soy sauce", "vinegar", "olive oil", "oils",
+          "tomato paste", "canned tomatoes", "canned corn",
+          "pickles", "pickled", "preserves", "canned food",
+          "olives", "olive", "cucumber pickle", "pickled cucumber",
+          "canned peas", "shelf stable", "jarred", "tinned"], 34),
+        # ── בשר ודגים (לפני fish שמופיע ב-fresh fish) ──
+        (["meat", "poultry", "chicken", "turkey", "beef", "lamb",
+          "sausage", "cold cuts", "pastrami", "salami",
+          "fish", "salmon", "carp", "tilapia"], 38),
+        # ── ניקיון וטיפוח ──
+        (["cleaning", "hygiene", "soap", "shampoo", "toothpaste",
+          "deodorant", "detergent", "laundry", "bleach",
+          "dishwashing", "surface cleaner", "sponge",
+          "tissues", "toilet paper", "diapers", "wipes",
+          "shower gel", "body wash", "hand soap",
+          "fabric softener", "air freshener"], 36),
+        # ── גבינות טריות (ספציפי — לפני dairies כללי) ──
+        (["fresh cheeses", "french cheeses", "spread cheeses",
+          "cottage cheese", "fromage frais", "mozzarella",
+          "feta", "parmesan", "gouda", "camembert", "brie",
+          "ricotta", "mascarpone", "cream cheese", "goat cheese"], 29),
+        # ── חלב ומוצרי חלב ──
+        (["dairies", "yogurts", "milk", "cheese", "butter", "cream",
+          "fermented milk", "dairy", "yogurt", "quark",
+          "sour cream", "whipped cream"], 30),
+        # ── פירות וירקות טריים (אחרונים — הכי פחות ספציפיים) ──
+        (["fruits", "vegetables", "fresh vegetables", "fresh fruits",
+          "salads", "leaf vegetables", "herbs", "mushrooms",
+          "potatoes", "tomatoes", "onions", "garlic", "peppers",
+          "citrus", "apples", "bananas", "grapes", "stone fruits",
+          "berries", "melons", "tropical fruits", "cucumbers",
+          "squashes", "aubergines", "avocados"], 28),
+        # ── מוצרי יסוד (קטניות, תבלינים, אפייה) — אחרונים לגמרי ──
+        (["legumes", "lentils", "chickpeas", "beans",
+          "sugar", "salt", "flour", "baking", "yeast",
+          "spices", "seasonings", "herbs dried",
+          "cereals", "muesli", "granola", "oats",
+          "breakfast cereals", "porridge"], 33),
+    ]
+
+    @classmethod
+    def _map_off_category(cls, off_category: str) -> int | None:
+        """ממפה off_category (מחרוזת מופרדת בפסיקים מ-OFF) ל-category_id פנימי.
+        מחזיר None אם לא נמצא מיפוי."""
+        if not off_category:
+            return None
+        cats_lower = off_category.lower()
+        for keywords, cat_id in cls.OFF_CATEGORY_MAP:
+            for kw in keywords:
+                if kw in cats_lower:
+                    return cat_id
+        return None
+
     def save_to_db(self, product_data: Dict[str, Any], category_id: int) -> Optional[int]:
         """שומר מוצר ב-DB המקומי. מדלג אם הברקוד כבר קיים."""
         barcode = product_data.get("barcode")
@@ -90,6 +168,12 @@ class OpenFoodFactsAdapter:
             if existing_id:
                 logger.debug(f"Product already in DB: barcode={barcode}, id={existing_id}")
                 return existing_id
+
+        # ── נסה למפות off_category לקטגוריה פנימית ──
+        mapped_cat = self._map_off_category(off_category)
+        if mapped_cat:
+            category_id = mapped_cat
+            logger.debug(f"Mapped OFF category '{off_category[:60]}...' -> cat_id={category_id}")
 
         self.session.execute(
             text("""

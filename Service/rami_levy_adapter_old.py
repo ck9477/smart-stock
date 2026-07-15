@@ -3,19 +3,28 @@ from playwright.sync_api import sync_playwright
 
 class RamiLevyAdapter:
 
-    def __init__(self):
-        self.play = sync_playwright().start()
-        self.browser = self.play.chromium.launch(headless=False)
-        self.page = self.browser.new_page()
+   def __init__(self):
+    self.play = sync_playwright().start()
 
-        self._go_to_homepage()
+    self.context = self.play.chromium.launch_persistent_context(
+    user_data_dir=r"C:\PlaywrightProfile",
+    executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    headless=False,
+)
+    print(self.context.pages)
+    self.page = self.context.pages[0]
+    print(self.page.url)
+
+    self.page = self.context.new_page()
+
+    self._go_to_homepage()
 
     def close(self):
-        """סגירת הדפדפן וניקוי משאבים."""
         try:
-            self.browser.close()
+            self.context.close()
         except Exception:
             pass
+
         try:
             self.play.stop()
         except Exception:
@@ -24,10 +33,10 @@ class RamiLevyAdapter:
     # ============================================================
     # ניווט ועזרים
     # ============================================================
-
     def _go_to_homepage(self):
-        self.page.goto("https://www.rami-levy.co.il/he", timeout=30000)
-        self.page.wait_for_timeout(5000)
+        self.page.goto("https://www.rami-levy.co.il/he")
+        self.page.wait_for_timeout(10000)
+
 
         for _ in range(3):
             body = self._get_body()
